@@ -280,30 +280,39 @@ void updateDashboardValues(int geminiWeekly, int gemini5Hr, int claudeWeekly, in
 }
 
 // =========================================================================
-// วาด Row เต็ม (ใช้ครั้งแรก - รวมหัวข้อ label)
+// วาด Row เต็ม (รวมกรอบสี่เหลี่ยมมุมโค้ง + ข้อความ + % + วงกลม)
 // =========================================================================
 void drawStatRowFull(int x, int y, const char* label, const char* subtext, int percent) {
-  // ข้อความหัวข้อ (Title)
+  int bx = x;
+  int by = y - 4;
+  int bw = 300;
+  int bh = 34;
+
+  // 1. วาดกรอบสี่เหลี่ยมมุมโค้ง (Card Frame)
+  uint16_t borderColor = 0x4B0D; // สีเทาฟ้าสว่าง (Slate Grey)
+  tft.drawRoundRect(bx, by, bw, bh, 5, borderColor);
+
+  // 2. ข้อความหัวข้อ (Title)
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(label, x + 10, y);
+  tft.drawString(label, bx + 10, by + 5);
 
-  // ข้อความ subtext
-  tft.fillRect(x + 10, y + 14, 200, 10, TFT_BLACK);
+  // 3. ข้อความ subtext (เวลานับถอยหลัง)
+  tft.fillRect(bx + 10, by + 18, 175, 11, TFT_BLACK);
   if (String(subtext).length() > 0) {
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(subtext, x + 10, y + 14);
+    tft.drawString(subtext, bx + 10, by + 18);
   }
 
-  // ตัวเลข % โควต้า
+  // 4. ตัวเลข % โควต้า
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TR_DATUM); 
-  tft.drawNumber(percent, 255, y + 2);
-  tft.drawString("%", 275, y + 2);
+  tft.drawNumber(percent, bx + 245, by + 7);
+  tft.drawString("%", bx + 263, by + 7);
 
-  // กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
+  // 5. กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
   uint16_t statusColor = TFT_GREEN;
   if (percent <= 20) {
     statusColor = TFT_RED;
@@ -311,34 +320,37 @@ void drawStatRowFull(int x, int y, const char* label, const char* subtext, int p
     statusColor = TFT_ORANGE;
   }
 
-  drawProgressRing(298, y + 10, 10, 3, percent, statusColor);
+  drawProgressRing(bx + 283, by + 17, 10, 3, percent, statusColor);
 }
 
 // =========================================================================
-// อัปเดตเฉพาะค่าที่เปลี่ยน (ไม่วาดซ้ำถ้าค่าไม่เปลี่ยน)
+// อัปเดตเฉพาะค่าที่เปลี่ยน ภายในกรอบเดิม (ไม่วาดกรอบใหม่ ไม่วาด label ซ้ำ)
 // =========================================================================
 void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtext, int percent, int& lastPercent) {
+  int bx = x;
+  int by = y - 4;
+
   // 1. อัปเดต Subtext เฉพาะเมื่อข้อความมีการเปลี่ยนแปลง (เช่น นาทีเวลานับถอยหลังลดลง)
   if (subtext != lastSubtext) {
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
-    tft.fillRect(x + 10, y + 14, 200, 10, TFT_BLACK);
+    tft.fillRect(bx + 10, by + 18, 175, 11, TFT_BLACK);
     if (subtext.length() > 0) {
       tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      tft.drawString(subtext.c_str(), x + 10, y + 14);
+      tft.drawString(subtext.c_str(), bx + 10, by + 18);
     }
     lastSubtext = subtext;
   }
 
   // 2. อัปเดตตัวเลข % และกราฟวงกลมเฉพาะเมื่อค่า % มีการเปลี่ยนแปลง
   if (percent != lastPercent) {
-    // ล้างโซนตัวเลข % และวาดใหม่
-    tft.fillRect(200, y, 80, 20, TFT_BLACK);
+    // ล้างโซนตัวเลข % ภายในกรอบแล้ววาดใหม่
+    tft.fillRect(bx + 186, by + 5, 80, 24, TFT_BLACK);
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(TR_DATUM);
-    tft.drawNumber(percent, 255, y + 2);
-    tft.drawString("%", 275, y + 2);
+    tft.drawNumber(percent, bx + 245, by + 7);
+    tft.drawString("%", bx + 263, by + 7);
 
     // กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
     uint16_t statusColor = TFT_GREEN;
@@ -349,7 +361,7 @@ void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtex
     }
 
     // วาดวงกลม progress ring ใหม่
-    drawProgressRing(298, y + 10, 10, 3, percent, statusColor);
+    drawProgressRing(bx + 283, by + 17, 10, 3, percent, statusColor);
     lastPercent = percent;
   }
 }
