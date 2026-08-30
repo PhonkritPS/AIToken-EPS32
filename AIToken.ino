@@ -1,4 +1,5 @@
 #include <TFT_eSPI.h>
+#include <Free_Fonts.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h> // ติดตั้งผ่าน Arduino Library Manager (ArduinoJson by Benoit Blanchon)
@@ -60,13 +61,12 @@ void setup() {
 
   String mac = WiFi.macAddress(); 
 
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(MC_DATUM); 
-  tft.setTextSize(2);
   tft.drawString("Connecting to Wi-Fi...", tft.width() / 2, (tft.height() / 2) - 20);
 
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  tft.setTextSize(2);
   tft.drawString("MAC: " + mac, tft.width() / 2, (tft.height() / 2) + 15);
 
   int attempts = 0;
@@ -231,32 +231,32 @@ void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int cl
   drawWiFiIcon(294, 2, isConnected);
   lastWiFiConnected = isConnected;
 
-  // --- Gemini Models (เลื่อนลง 10px -> y = 16) ---
+  // --- Gemini Models ---
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TL_DATUM); 
-  tft.setTextSize(2);
   tft.drawString("Gemini Models", 8, 16);
 
-  // กรอบสี่เหลี่ยมรวมสำหรับ Gemini Models (เลื่อนลง 10px -> by = 36)
+  // กรอบสี่เหลี่ยมรวมสำหรับ Gemini Models
   drawGroupCard(0, 36, 320, 74, 
                 "Weekly Limit Remaining", geminiWeeklySub.c_str(), geminiWeekly,
                 "Five Hour Limit Remaining", gemini5HrSub.c_str(), gemini5Hr);
 
-  // --- Claude and GPT models (เลื่อนลง 10px -> y = 118) ---
+  // --- Claude and GPT models ---
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TL_DATUM); 
-  tft.setTextSize(2);
   tft.drawString("Claude and GPT models", 8, 118);
 
-  // กรอบสี่เหลี่ยมรวมสำหรับ Claude and GPT models (เลื่อนลง 10px -> by = 138)
+  // กรอบสี่เหลี่ยมรวมสำหรับ Claude and GPT models
   drawGroupCard(0, 138, 320, 74, 
                 "Weekly Limit Remaining", claudeWeeklySub.c_str(), claudeWeekly,
                 "Five Hour Limit Remaining", claude5HrSub.c_str(), claude5Hr);
 
   // --- ข้อความ Antigravity ด้านล่างสุดตรงกลาง ---
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.setTextDatum(BC_DATUM);
-  tft.setTextSize(2);
   tft.drawString("Antigravity", tft.width() / 2, 236);
 
   // จำค่าปัจจุบันไว้
@@ -309,20 +309,21 @@ void drawGroupCard(int bx, int by, int bw, int bh,
   int y1_ring = by + 20;
 
   // Title 1: ข้อความสีเทาอ่อน
-  tft.setTextSize(1);
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(label1, bx + 8, by + 7);
+  tft.drawString(label1, bx + 8, by + 5);
 
   // Subtext 1: ข้อความสีเทาเข้ม
   tft.fillRect(bx + 8, y1_sub, 190, 11, TFT_BLACK);
   if (String(subtext1).length() > 0) {
+    tft.setFreeFont(FSS9);
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString(subtext1, bx + 8, y1_sub);
   }
 
   // Percent 1: ตัวเลขสีขาว
-  tft.setTextSize(2);
+  tft.setFreeFont(FSSB12);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TR_DATUM);
   tft.drawNumber(percent1, bx + 260, y1_num);
@@ -340,20 +341,21 @@ void drawGroupCard(int bx, int by, int bw, int bh,
   int y2_ring = by + 56;
 
   // Title 2: ข้อความสีเทาอ่อน
-  tft.setTextSize(1);
+  tft.setFreeFont(FSSB9);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(label2, bx + 8, by + 43);
+  tft.drawString(label2, bx + 8, by + 42);
 
   // Subtext 2: ข้อความสีเทาเข้ม
   tft.fillRect(bx + 8, y2_sub, 190, 11, TFT_BLACK);
   if (String(subtext2).length() > 0) {
+    tft.setFreeFont(FSS9);
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString(subtext2, bx + 8, y2_sub);
   }
 
   // Percent 2: ตัวเลขสีขาว
-  tft.setTextSize(2);
+  tft.setFreeFont(FSSB12);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TR_DATUM);
   tft.drawNumber(percent2, bx + 260, y2_num);
@@ -371,7 +373,7 @@ void updateSingleItem(int bx, int subtextY, int numY, int ringY,
                       int percent, int& lastPercent) {
   // 1. อัปเดต Subtext เฉพาะเมื่อข้อความเปลี่ยนแปลง
   if (subtext != lastSubtext) {
-    tft.setTextSize(1);
+    tft.setFreeFont(FSS9);
     tft.setTextDatum(TL_DATUM);
     tft.fillRect(bx + 8, subtextY, 190, 11, TFT_BLACK);
     if (subtext.length() > 0) {
@@ -384,7 +386,7 @@ void updateSingleItem(int bx, int subtextY, int numY, int ringY,
   // 2. อัปเดต % และวงกลมเฉพาะเมื่อค่า % เปลี่ยนแปลง
   if (percent != lastPercent) {
     tft.fillRect(bx + 200, numY - 2, 82, 24, TFT_BLACK);
-    tft.setTextSize(2);
+    tft.setFreeFont(FSSB12);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(TR_DATUM);
     tft.drawNumber(percent, bx + 260, numY);
