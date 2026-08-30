@@ -32,9 +32,13 @@ bool lastWiFiConnected = false;
 
 // ประกาศฟังก์ชันล่วงหน้า
 void drawWiFiIcon(int x, int y, bool connected);
-void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color);
-void drawStatRowFull(int x, int y, const char* label, const char* subtext, int percent);
-void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtext, int percent, int& lastPercent);
+void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bgFillColor = TFT_BLACK);
+void drawGroupCard(int bx, int by, int bw, int bh, 
+                   const char* label1, const char* subtext1, int percent1,
+                   const char* label2, const char* subtext2, int percent2);
+void updateSingleItem(int bx, int subtextY, int numY, int ringY, 
+                      const String& subtext, String& lastSubtext, 
+                      int percent, int& lastPercent);
 void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr,
                        String geminiWeeklySub, String gemini5HrSub,
                        String claudeWeeklySub, String claude5HrSub);
@@ -180,12 +184,12 @@ void drawWiFiIcon(int x, int y, bool connected) {
 // =========================================================================
 // ฟังก์ชันวาดวงแหวน Circular Progress Ring ตามเปอร์เซ็นต์จริง (0 - 100%)
 // =========================================================================
-void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color) {
-  // ล้างพื้นที่วงกลม
-  tft.fillCircle(cx, cy, r + 1, TFT_BLACK);
+void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bgFillColor) {
+  // ล้างพื้นที่วงกลมเป็นสีดำ
+  tft.fillCircle(cx, cy, r + 1, bgFillColor);
 
   // 1. วาดวงแหวนพื้นหลังสีเทาเข้ม (Track แสดงพื้นที่ 100%)
-  uint16_t trackColor = 0x3186; // เทาเข้มโปร่งๆ เหมือนใน IDE
+  uint16_t trackColor = 0x3186; // เทาเข้มโปร่งๆ
   for (float angle = 0; angle < 360.0f; angle += 0.5f) {
     float rad = angle * 0.0174532925f; // DEG_TO_RAD
     float cosA = cos(rad);
@@ -197,7 +201,7 @@ void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_
     }
   }
 
-  // 2. วาดเส้นความคืบหน้า (Active Arc) ตาม % จริง (เริ่มจากจุดบนสุด -90 องศา วนตามเข็มนาฬิกา)
+  // 2. วาดเส้นความคืบหน้า (Active Arc) ตาม % จริง
   percent = constrain(percent, 0, 100);
   if (percent > 0) {
     float endAngle = (percent * 360.0f) / 100.0f;
@@ -222,31 +226,38 @@ void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int cl
                        String claudeWeeklySub, String claude5HrSub) {
   tft.fillScreen(TFT_BLACK); 
 
-  // วาดไอคอน Wi-Fi มุมขวาบนสุด
+  // วาดไอคอน Wi-Fi มุมขวาบนสุด (ตำแหน่งเดิม y = 2)
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   drawWiFiIcon(294, 2, isConnected);
   lastWiFiConnected = isConnected;
 
-  // --- Gemini Models ---
+  // --- Gemini Models (เลื่อนลง 10px -> y = 16) ---
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TL_DATUM); 
   tft.setTextSize(2);
-  tft.drawString("Gemini Models", 10, 8);
+  tft.drawString("Gemini Models", 8, 16);
 
-  drawStatRowFull(10, 32, "Weekly Limit Remaining", geminiWeeklySub.c_str(), geminiWeekly);
-  drawStatRowFull(10, 68, "Five Hour Limit Remaining", gemini5HrSub.c_str(), gemini5Hr);
+  // กรอบสี่เหลี่ยมรวมสำหรับ Gemini Models (เลื่อนลง 10px -> by = 36)
+  drawGroupCard(0, 36, 320, 74, 
+                "Weekly Limit Remaining", geminiWeeklySub.c_str(), geminiWeekly,
+                "Five Hour Limit Remaining", gemini5HrSub.c_str(), gemini5Hr);
 
-  // เส้นคั่นกลาง
-  tft.drawFastHLine(10, 108, 300, TFT_DARKGREY);
-
-  // --- Claude and GPT models ---
+  // --- Claude and GPT models (เลื่อนลง 10px -> y = 118) ---
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextDatum(TL_DATUM); 
   tft.setTextSize(2);
-  tft.drawString("Claude and GPT models", 10, 120);
+  tft.drawString("Claude and GPT models", 8, 118);
 
-  drawStatRowFull(10, 144, "Weekly Limit Remaining", claudeWeeklySub.c_str(), claudeWeekly);
-  drawStatRowFull(10, 180, "Five Hour Limit Remaining", claude5HrSub.c_str(), claude5Hr);
+  // กรอบสี่เหลี่ยมรวมสำหรับ Claude and GPT models (เลื่อนลง 10px -> by = 138)
+  drawGroupCard(0, 138, 320, 74, 
+                "Weekly Limit Remaining", claudeWeeklySub.c_str(), claudeWeekly,
+                "Five Hour Limit Remaining", claude5HrSub.c_str(), claude5Hr);
+
+  // --- ข้อความ Antigravity ด้านล่างสุดตรงกลาง ---
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(BC_DATUM);
+  tft.setTextSize(2);
+  tft.drawString("Antigravity", tft.width() / 2, 236);
 
   // จำค่าปัจจุบันไว้
   lastGeminiWeekly = geminiWeekly;
@@ -265,103 +276,122 @@ void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int cl
 void updateDashboardValues(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr,
                            String geminiWeeklySub, String gemini5HrSub,
                            String claudeWeeklySub, String claude5HrSub) {
-  // อัปเดตไอคอน WiFi เฉพาะเมื่อสถานะเปลี่ยน
+  // อัปเดตไอคอน WiFi เฉพาะเมื่อสถานะเปลี่ยน (y = 2 ตามเดิม)
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   if (isConnected != lastWiFiConnected) {
     drawWiFiIcon(294, 2, isConnected);
     lastWiFiConnected = isConnected;
   }
 
-  // อัปเดตแต่ละ row (จะวาดตัวเลขและวงกลมเฉพาะเมื่อ % เปลี่ยน และวาดเวลาเฉพาะเมื่อ subtext เปลี่ยน)
-  updateStatRowValues(10, 32,  geminiWeeklySub, lastGeminiWeeklySub, geminiWeekly, lastGeminiWeekly);
-  updateStatRowValues(10, 68,  gemini5HrSub,    lastGemini5HrSub,    gemini5Hr,    lastGemini5Hr);
-  updateStatRowValues(10, 144, claudeWeeklySub, lastClaudeWeeklySub, claudeWeekly, lastClaudeWeekly);
-  updateStatRowValues(10, 180, claude5HrSub,    lastClaude5HrSub,    claude5Hr,    lastClaude5Hr);
+  // อัปเดต Gemini Card 1 (bx = 0, by = 36)
+  updateSingleItem(0, 36 + 20, 36 + 10, 36 + 20, geminiWeeklySub, lastGeminiWeeklySub, geminiWeekly, lastGeminiWeekly);
+  updateSingleItem(0, 36 + 56, 36 + 46, 36 + 56, gemini5HrSub,    lastGemini5HrSub,    gemini5Hr,    lastGemini5Hr);
+
+  // อัปเดต Claude Card 2 (bx = 0, by = 138)
+  updateSingleItem(0, 138 + 20, 138 + 10, 138 + 20, claudeWeeklySub, lastClaudeWeeklySub, claudeWeekly, lastClaudeWeekly);
+  updateSingleItem(0, 138 + 56, 138 + 46, 138 + 56, claude5HrSub,    lastClaude5HrSub,    claude5Hr,    lastClaude5Hr);
 }
 
 // =========================================================================
-// วาด Row เต็ม (รวมกรอบสี่เหลี่ยมมุมโค้ง + ข้อความ + % + วงกลม)
+// วาด Group Card รวม 2 รายการ ชิดขอบซ้าย-ขวา (Dark Theme)
 // =========================================================================
-void drawStatRowFull(int x, int y, const char* label, const char* subtext, int percent) {
-  int bx = x;
-  int by = y - 4;
-  int bw = 300;
-  int bh = 34;
-
-  // 1. วาดกรอบสี่เหลี่ยมมุมโค้ง (Card Frame)
+void drawGroupCard(int bx, int by, int bw, int bh, 
+                   const char* label1, const char* subtext1, int percent1,
+                   const char* label2, const char* subtext2, int percent2) {
+  // 1. วาดกรอบสี่เหลี่ยมชิดขอบซ้าย-ขวา (Dark Theme Card Frame)
+  tft.fillRoundRect(bx, by, bw, bh, 4, TFT_BLACK);
   uint16_t borderColor = 0x4B0D; // สีเทาฟ้าสว่าง (Slate Grey)
-  tft.drawRoundRect(bx, by, bw, bh, 5, borderColor);
+  tft.drawRoundRect(bx, by, bw, bh, 4, borderColor);
 
-  // 2. ข้อความหัวข้อ (Title)
+  // --- รายการที่ 1 (Weekly Limit) ---
+  int y1_sub = by + 20;
+  int y1_num = by + 10;
+  int y1_ring = by + 20;
+
+  // Title 1: ข้อความสีเทาอ่อน
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(label, bx + 10, by + 5);
+  tft.drawString(label1, bx + 8, by + 7);
 
-  // 3. ข้อความ subtext (เวลานับถอยหลัง)
-  tft.fillRect(bx + 10, by + 18, 175, 11, TFT_BLACK);
-  if (String(subtext).length() > 0) {
+  // Subtext 1: ข้อความสีเทาเข้ม
+  tft.fillRect(bx + 8, y1_sub, 190, 11, TFT_BLACK);
+  if (String(subtext1).length() > 0) {
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(subtext, bx + 10, by + 18);
+    tft.drawString(subtext1, bx + 8, y1_sub);
   }
 
-  // 4. ตัวเลข % โควต้า
+  // Percent 1: ตัวเลขสีขาว
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextDatum(TR_DATUM); 
-  tft.drawNumber(percent, bx + 245, by + 7);
-  tft.drawString("%", bx + 263, by + 7);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawNumber(percent1, bx + 260, y1_num);
+  tft.drawString("%", bx + 278, y1_num);
 
-  // 5. กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
-  uint16_t statusColor = TFT_GREEN;
-  if (percent <= 20) {
-    statusColor = TFT_RED;
-  } else if (percent <= 50) {
-    statusColor = TFT_ORANGE;
+  uint16_t color1 = (percent1 <= 20) ? TFT_RED : (percent1 <= 50) ? TFT_ORANGE : TFT_GREEN;
+  drawProgressRing(bx + 304, y1_ring, 10, 3, percent1, color1, TFT_BLACK);
+
+  // --- เส้นคั่นกลางภายในกรอบ ---
+  tft.drawFastHLine(bx, by + 37, bw, 0x2965);
+
+  // --- รายการที่ 2 (Five Hour Limit) ---
+  int y2_sub = by + 56;
+  int y2_num = by + 46;
+  int y2_ring = by + 56;
+
+  // Title 2: ข้อความสีเทาอ่อน
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(label2, bx + 8, by + 43);
+
+  // Subtext 2: ข้อความสีเทาเข้ม
+  tft.fillRect(bx + 8, y2_sub, 190, 11, TFT_BLACK);
+  if (String(subtext2).length() > 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(subtext2, bx + 8, y2_sub);
   }
 
-  drawProgressRing(bx + 283, by + 17, 10, 3, percent, statusColor);
+  // Percent 2: ตัวเลขสีขาว
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawNumber(percent2, bx + 260, y2_num);
+  tft.drawString("%", bx + 278, y2_num);
+
+  uint16_t color2 = (percent2 <= 20) ? TFT_RED : (percent2 <= 50) ? TFT_ORANGE : TFT_GREEN;
+  drawProgressRing(bx + 304, y2_ring, 10, 3, percent2, color2, TFT_BLACK);
 }
 
 // =========================================================================
-// อัปเดตเฉพาะค่าที่เปลี่ยน ภายในกรอบเดิม (ไม่วาดกรอบใหม่ ไม่วาด label ซ้ำ)
+// อัปเดตเฉพาะค่าที่เปลี่ยนในแต่ละรายการ (Dark Theme)
 // =========================================================================
-void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtext, int percent, int& lastPercent) {
-  int bx = x;
-  int by = y - 4;
-
-  // 1. อัปเดต Subtext เฉพาะเมื่อข้อความมีการเปลี่ยนแปลง (เช่น นาทีเวลานับถอยหลังลดลง)
+void updateSingleItem(int bx, int subtextY, int numY, int ringY, 
+                      const String& subtext, String& lastSubtext, 
+                      int percent, int& lastPercent) {
+  // 1. อัปเดต Subtext เฉพาะเมื่อข้อความเปลี่ยนแปลง
   if (subtext != lastSubtext) {
     tft.setTextSize(1);
     tft.setTextDatum(TL_DATUM);
-    tft.fillRect(bx + 10, by + 18, 175, 11, TFT_BLACK);
+    tft.fillRect(bx + 8, subtextY, 190, 11, TFT_BLACK);
     if (subtext.length() > 0) {
       tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      tft.drawString(subtext.c_str(), bx + 10, by + 18);
+      tft.drawString(subtext.c_str(), bx + 8, subtextY);
     }
     lastSubtext = subtext;
   }
 
-  // 2. อัปเดตตัวเลข % และกราฟวงกลมเฉพาะเมื่อค่า % มีการเปลี่ยนแปลง
+  // 2. อัปเดต % และวงกลมเฉพาะเมื่อค่า % เปลี่ยนแปลง
   if (percent != lastPercent) {
-    // ล้างโซนตัวเลข % ภายในกรอบแล้ววาดใหม่
-    tft.fillRect(bx + 186, by + 5, 80, 24, TFT_BLACK);
+    tft.fillRect(bx + 200, numY - 2, 82, 24, TFT_BLACK);
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(TR_DATUM);
-    tft.drawNumber(percent, bx + 245, by + 7);
-    tft.drawString("%", bx + 263, by + 7);
+    tft.drawNumber(percent, bx + 260, numY);
+    tft.drawString("%", bx + 278, numY);
 
-    // กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
-    uint16_t statusColor = TFT_GREEN;
-    if (percent <= 20) {
-      statusColor = TFT_RED;
-    } else if (percent <= 50) {
-      statusColor = TFT_ORANGE;
-    }
-
-    // วาดวงกลม progress ring ใหม่
-    drawProgressRing(bx + 283, by + 17, 10, 3, percent, statusColor);
+    uint16_t color = (percent <= 20) ? TFT_RED : (percent <= 50) ? TFT_ORANGE : TFT_GREEN;
+    drawProgressRing(bx + 304, ringY, 10, 3, percent, color, TFT_BLACK);
     lastPercent = percent;
   }
 }
