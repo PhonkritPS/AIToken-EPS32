@@ -3,7 +3,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h> // ติดตั้งผ่าน Arduino Library Manager (ArduinoJson by Benoit Blanchon)
 
-TFT_eSPI tft = TFT_eSPI(); 
+TFT_eSPI tft = TFT_eSPI();
 
 // Wi-Fi Config
 const char* ssid = "H101-2.4GHz";
@@ -18,46 +18,66 @@ unsigned long lastFetchTime = 0;
 
 // แฟลกสำหรับแยกว่าเป็นการวาดครั้งแรก (full draw) หรืออัปเดตบางส่วน (partial update)
 bool isFirstDraw = true;
-
-// ตัวแปรเก็บค่าเดิมเพื่อเปรียบเทียบ (ถ้าเป็นค่าเดิมจะไม่รีเฟรชตัวเลขและวงกลม)
-int lastGeminiWeekly = -1;
-int lastGemini5Hr = -1;
-int lastClaudeWeekly = -1;
-int lastClaude5Hr = -1;
-String lastGeminiWeeklySub = "";
-String lastGemini5HrSub = "";
-String lastClaudeWeeklySub = "";
-String lastClaude5HrSub = "";
 bool lastWiFiConnected = false;
 
+// =========================================================================
+// Layout หน้าเดียว 320x240: 3 ส่วน (Gemini / Claude & GPT / Claude Code)
+// แต่ละส่วนมีการ์ดครึ่งจอ 2 ใบ ซ้าย = Weekly, ขวา = 5 Hour
+// ใต้ส่วน Claude Code มีการ์ด Token อีก 2 ใบ ซ้าย = วันนี้, ขวา = 5 ชม. ปัจจุบัน
+// =========================================================================
+const int CARD_W = 154;
+const int CARD_H = 42;
+const int COL_X[2] = { 4, 162 };
+const int SECTION_Y[3] = { 5, 66, 127 };   // ตำแหน่งหัวข้อของแต่ละส่วน (การ์ดอยู่ต่ำลงมา 12px)
+const int TOKEN_Y = 185;
+
+// พื้นหลังแยกกลุ่ม: 0 = Antigravity (Gemini + Claude & GPT), 1 = Claude Code
+const uint16_t PANEL_BG[2] = { 0x08C5, 0x28A1 };      // กรมท่าเข้ม / น้ำตาลอมส้มเข้ม
+const uint16_t PANEL_BORDER[2] = { 0x4B0D, 0x6A06 };  // กรอบการ์ด: เทาฟ้า / ส้มอิฐ
+const char* PANEL_TAG[2] = { "ANTIGRAVITY", "CLAUDE CODE" };
+const int PANEL_Y[2] = { 1, 123 };
+const int PANEL_H[2] = { 121, 116 };
+int sectionGroup(int s) { return s < 2 ? 0 : 1; }
+const uint16_t SECTION_COLOR[3] = { 0x443E, 0xA45F, 0xDBAA }; // ฟ้า Gemini / ม่วง / ส้ม Claude
+const char* SECTION_TITLE[3] = { "Gemini Models", "Claude & GPT", "Plan Usage" };
+
+// การ์ด % โควต้า 6 ใบ: [ส่วน * 2 + คอลัมน์]
+const int PCT_CARDS = 6;
+const char* PCT_KEY[PCT_CARDS] = { "geminiWeekly", "gemini5Hr", "claudeWeekly", "claude5Hr", "ccWeekly", "cc5Hr" };
+int pctValue[PCT_CARDS];
+String pctReset[PCT_CARDS];
+int lastPctValue[PCT_CARDS] = { -1, -1, -1, -1, -1, -1 };
+String lastPctReset[PCT_CARDS];
+
+// การ์ด Token 2 ใบ
+const int TOKEN_CARDS = 2;
+const char* TOKEN_KEY[TOKEN_CARDS] = { "ccToday", "ccWindow" };
+const char* TOKEN_LABEL[TOKEN_CARDS] = { "Day Tokens", "5H Tokens" };
+String tokenTotal[TOKEN_CARDS], tokenIn[TOKEN_CARDS], tokenOut[TOKEN_CARDS], tokenCache[TOKEN_CARDS];
+String lastTokenTotal[TOKEN_CARDS], lastTokenDetail[TOKEN_CARDS];
+
 // ประกาศฟังก์ชันล่วงหน้า
-void drawWiFiIcon(int x, int y, bool connected);
-void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color);
-void drawStatRowFull(int x, int y, const char* label, const char* subtext, int percent);
-void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtext, int percent, int& lastPercent);
-void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr,
-                       String geminiWeeklySub, String gemini5HrSub,
-                       String claudeWeeklySub, String claude5HrSub);
-void updateDashboardValues(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr,
-                           String geminiWeeklySub, String gemini5HrSub,
-                           String claudeWeeklySub, String claude5HrSub);
+void drawWiFiIcon(int x, int y, bool connected, uint16_t bg);
+void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bg);
+void drawDashboardFull();
+void updateDashboardValues();
 void fetchAndDisplayQuota();
 
 void setup() {
-  Serial.begin(115200); 
-  
+  Serial.begin(115200);
+
   tft.init();
-  tft.setRotation(1); 
-  tft.fillScreen(TFT_BLACK); 
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  delay(500); 
+  delay(500);
 
-  String mac = WiFi.macAddress(); 
+  String mac = WiFi.macAddress();
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextDatum(MC_DATUM); 
+  tft.setTextDatum(MC_DATUM);
   tft.setTextSize(2);
   tft.drawString("Connecting to Wi-Fi...", tft.width() / 2, (tft.height() / 2) - 20);
 
@@ -77,7 +97,8 @@ void setup() {
     Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
     fetchAndDisplayQuota();
   } else {
-    drawDashboardFull(0, 0, 0, 0, "No Connection", "", "", "");
+    for (int i = 0; i < PCT_CARDS; i++) pctValue[i] = 0;
+    drawDashboardFull();
   }
 }
 
@@ -97,7 +118,7 @@ void fetchAndDisplayQuota() {
     Serial.println("WiFi not connected. Retrying connection...");
     WiFi.reconnect();
     if (lastWiFiConnected) {
-      drawWiFiIcon(294, 2, false);
+      drawWiFiIcon(294, 3, false, PANEL_BG[0]);
       lastWiFiConnected = false;
     }
     return;
@@ -112,29 +133,29 @@ void fetchAndDisplayQuota() {
     String payload = http.getString();
     Serial.println("Received payload: " + payload);
 
-    StaticJsonDocument<1024> doc;
+    DynamicJsonDocument doc(4096);
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
-      int geminiWeekly = doc["geminiWeekly"] | 100;
-      int gemini5Hr = doc["gemini5Hr"] | 100;
-      String geminiWeeklySub = doc["geminiWeeklySubtext"].as<String>();
-      String gemini5HrSub = doc["gemini5HrSubtext"].as<String>();
-
-      int claudeWeekly = doc["claudeWeekly"] | 100;
-      int claude5Hr = doc["claude5Hr"] | 100;
-      String claudeWeeklySub = doc["claudeWeeklySubtext"].as<String>();
-      String claude5HrSub = doc["claude5HrSubtext"].as<String>();
+      for (int i = 0; i < PCT_CARDS; i++) {
+        pctValue[i] = doc[PCT_KEY[i]] | 100;
+        pctReset[i] = doc[String(PCT_KEY[i]) + "Reset"] | "";
+      }
+      for (int i = 0; i < TOKEN_CARDS; i++) {
+        String key = TOKEN_KEY[i];
+        tokenTotal[i] = doc[key + "Tokens"] | "-";
+        tokenIn[i] = doc[key + "In"] | "-";
+        tokenOut[i] = doc[key + "Out"] | "-";
+        tokenCache[i] = doc[key + "Cache"] | "-";
+      }
 
       if (isFirstDraw) {
-        // ครั้งแรก: วาดหน้าจอทั้งหมด รวมถึงหัวข้อ, เส้นคั่น
-        drawDashboardFull(geminiWeekly, gemini5Hr, claudeWeekly, claude5Hr,
-                          geminiWeeklySub, gemini5HrSub, claudeWeeklySub, claude5HrSub);
+        // ครั้งแรก: วาดหน้าจอทั้งหมด รวมถึงหัวข้อและกรอบการ์ด
+        drawDashboardFull();
         isFirstDraw = false;
       } else {
-        // ครั้งต่อไป: อัปเดตเฉพาะตัวเลข%, subtext, วงกลม และไอคอน WiFi (เฉพาะส่วนที่เปลี่ยน)
-        updateDashboardValues(geminiWeekly, gemini5Hr, claudeWeekly, claude5Hr,
-                              geminiWeeklySub, gemini5HrSub, claudeWeeklySub, claude5HrSub);
+        // ครั้งต่อไป: อัปเดตเฉพาะตัวเลข, เวลา reset, วงกลม และไอคอน WiFi (เฉพาะส่วนที่เปลี่ยน)
+        updateDashboardValues();
       }
     } else {
       Serial.print("JSON Parse error: ");
@@ -148,41 +169,39 @@ void fetchAndDisplayQuota() {
 }
 
 // =========================================================================
-// ฟังก์ชันวาดไอคอน Wi-Fi
+// ฟังก์ชันวาดไอคอน Wi-Fi ขนาดเล็ก (ประมาณ 20x14 px อยู่บนแถวหัวข้อ)
 // =========================================================================
-void drawWiFiIcon(int x, int y, bool connected) {
+void drawWiFiIcon(int x, int y, bool connected, uint16_t bg) {
   uint16_t iconColor = connected ? TFT_LIGHTGREY : TFT_DARKGREY;
-  
-  tft.fillRect(x - 2, y, 28, 34, TFT_BLACK); 
-  
-  int cx = x + 12;
-  int cy = y + 19;
-  
-  tft.drawCircle(cx, cy, 12, iconColor);
-  tft.drawCircle(cx, cy, 11, iconColor);
-  
+  int cx = x + 10;
+  int cy = y + 12;
+
+  tft.fillRect(x, y, 21, 14, bg);
+
+  tft.drawCircle(cx, cy, 9, iconColor);
   tft.drawCircle(cx, cy, 8, iconColor);
-  tft.drawCircle(cx, cy, 7, iconColor);
-  
-  tft.fillTriangle(cx, cy, x - 2, cy, x - 2, cy - 14, TFT_BLACK);             
-  tft.fillTriangle(cx, cy, x + 26, cy, x + 26, cy - 14, TFT_BLACK);   
-  tft.fillRect(x - 2, cy, 28, 15, TFT_BLACK);
-  
-  tft.fillCircle(cx, cy - 2, 2, iconColor);
-  tft.drawRoundRect(x, y, 24, 24, 4, TFT_DARKGREY);
-  
+  tft.drawCircle(cx, cy, 5, iconColor);
+  tft.drawCircle(cx, cy, 4, iconColor);
+
+  // ตัดให้เหลือเฉพาะส่วนโค้งด้านบน 90 องศา
+  tft.fillTriangle(cx, cy, cx - 10, cy, cx - 10, cy - 10, bg);
+  tft.fillTriangle(cx, cy, cx + 10, cy, cx + 10, cy - 10, bg);
+  tft.fillRect(cx - 10, cy + 1, 21, 9, bg);
+
+  tft.fillCircle(cx, cy - 1, 1, iconColor);
+
   if (!connected) {
-    tft.drawLine(x, y, x + 24, y + 24, TFT_RED);
-    tft.drawLine(x + 24, y, x, y + 24, TFT_RED);
+    tft.drawLine(x + 3, y + 1, x + 17, y + 13, TFT_RED);
+    tft.drawLine(x + 17, y + 1, x + 3, y + 13, TFT_RED);
   }
 }
 
 // =========================================================================
 // ฟังก์ชันวาดวงแหวน Circular Progress Ring ตามเปอร์เซ็นต์จริง (0 - 100%)
 // =========================================================================
-void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color) {
+void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bg) {
   // ล้างพื้นที่วงกลม
-  tft.fillCircle(cx, cy, r + 1, TFT_BLACK);
+  tft.fillCircle(cx, cy, r + 1, bg);
 
   // 1. วาดวงแหวนพื้นหลังสีเทาเข้ม (Track แสดงพื้นที่ 100%)
   uint16_t trackColor = 0x3186; // เทาเข้มโปร่งๆ เหมือนใน IDE
@@ -214,155 +233,195 @@ void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_
   }
 }
 
+// ตำแหน่งการ์ด % ใบที่ i
+int pctCardX(int i) { return COL_X[i % 2]; }
+int pctCardY(int i) { return SECTION_Y[i / 2] + 12; }
+uint16_t pctCardBg(int i) { return PANEL_BG[sectionGroup(i / 2)]; }
+
+// สีตามปริมาณที่เหลือ
+uint16_t statusColor(int percent) {
+  if (percent <= 20) return TFT_RED;
+  if (percent <= 50) return TFT_ORANGE;
+  return TFT_GREEN;
+}
+
+// =========================================================================
+// การ์ด % โควต้า (ครึ่งจอ): label + ตัวเลข % + เวลา reset + วงกลม
+// =========================================================================
+void drawPctValue(int i) {
+  int x = pctCardX(i);
+  int y = pctCardY(i);
+
+  uint16_t bg = pctCardBg(i);
+
+  tft.fillRect(x + 6, y + 18, 56, 18, bg);
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(String(pctValue[i]) + "%", x + 8, y + 20);
+
+  drawProgressRing(x + CARD_W - 22, y + 21, 14, 3, pctValue[i], statusColor(pctValue[i]), bg);
+}
+
+void drawPctReset(int i) {
+  int x = pctCardX(i);
+  int y = pctCardY(i);
+
+  uint16_t bg = pctCardBg(i);
+
+  tft.fillRect(x + 62, y + 26, 54, 10, bg);
+  if (pctReset[i].length() > 0) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(pctReset[i].c_str(), x + 64, y + 27);
+  }
+}
+
+void drawPctCardFull(int i) {
+  int x = pctCardX(i);
+  int y = pctCardY(i);
+
+  uint16_t bg = pctCardBg(i);
+
+  tft.drawRoundRect(x, y, CARD_W, CARD_H, 5, PANEL_BORDER[sectionGroup(i / 2)]);
+
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString((i % 2 == 0) ? "Weekly" : "5 Hour", x + 8, y + 7);
+
+  drawPctValue(i);
+  drawPctReset(i);
+  lastPctValue[i] = pctValue[i];
+  lastPctReset[i] = pctReset[i];
+}
+
+// =========================================================================
+// การ์ด Token (ครึ่งจอ): label + จำนวนรวม + รายละเอียด in/out/cache ชิดขวา
+// =========================================================================
+void drawTokenTotal(int i) {
+  int x = COL_X[i];
+  int y = TOKEN_Y;
+
+  uint16_t bg = PANEL_BG[1];
+
+  tft.fillRect(x + 6, y + 18, 70, 18, bg);
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_CYAN, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(tokenTotal[i].c_str(), x + 8, y + 20);
+}
+
+void drawTokenDetail(int i) {
+  int x = COL_X[i];
+  int y = TOKEN_Y;
+  int rx = x + CARD_W - 8;
+
+  uint16_t bg = PANEL_BG[1];
+
+  tft.fillRect(x + 78, y + 4, 70, 34, bg);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(("in " + tokenIn[i]).c_str(), rx, y + 6);
+  tft.drawString(("out " + tokenOut[i]).c_str(), rx, y + 17);
+  tft.drawString(("cache " + tokenCache[i]).c_str(), rx, y + 28);
+}
+
+String tokenDetailKey(int i) {
+  return tokenIn[i] + "|" + tokenOut[i] + "|" + tokenCache[i];
+}
+
+void drawTokenCardFull(int i) {
+  int x = COL_X[i];
+  int y = TOKEN_Y;
+
+  tft.drawRoundRect(x, y, CARD_W, CARD_H, 5, PANEL_BORDER[1]);
+
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, PANEL_BG[1]);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(TOKEN_LABEL[i], x + 8, y + 7);
+
+  drawTokenTotal(i);
+  drawTokenDetail(i);
+  lastTokenTotal[i] = tokenTotal[i];
+  lastTokenDetail[i] = tokenDetailKey(i);
+}
+
+// =========================================================================
+// หัวข้อของแต่ละส่วน: แถบสีเล็กๆ + ชื่อ
+// =========================================================================
+void drawSectionHeader(int s) {
+  int y = SECTION_Y[s];
+  tft.fillRoundRect(COL_X[0] + 2, y, 3, 9, 1, SECTION_COLOR[s]);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, PANEL_BG[sectionGroup(s)]);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(SECTION_TITLE[s], COL_X[0] + 10, y + 1);
+}
+
 // =========================================================================
 // วาดหน้าจอทั้งหมด (ใช้ครั้งแรกเท่านั้น)
 // =========================================================================
-void drawDashboardFull(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr, 
-                       String geminiWeeklySub, String gemini5HrSub, 
-                       String claudeWeeklySub, String claude5HrSub) {
-  tft.fillScreen(TFT_BLACK); 
+void drawDashboardFull() {
+  tft.fillScreen(TFT_BLACK);
 
   // วาดไอคอน Wi-Fi มุมขวาบนสุด
+  // พื้นหลังแผงแยกกลุ่ม Antigravity / Claude Code
+  for (int g = 0; g < 2; g++) {
+    tft.fillRoundRect(1, PANEL_Y[g], 318, PANEL_H[g], 6, PANEL_BG[g]);
+  }
+
   bool isConnected = (WiFi.status() == WL_CONNECTED);
-  drawWiFiIcon(294, 2, isConnected);
+  drawWiFiIcon(294, 3, isConnected, PANEL_BG[0]);
   lastWiFiConnected = isConnected;
 
-  // --- Gemini Models ---
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextDatum(TL_DATUM); 
-  tft.setTextSize(2);
-  tft.drawString("Gemini Models", 10, 8);
+  for (int s = 0; s < 3; s++) drawSectionHeader(s);
 
-  drawStatRowFull(10, 32, "Weekly Limit Remaining", geminiWeeklySub.c_str(), geminiWeekly);
-  drawStatRowFull(10, 68, "Five Hour Limit Remaining", gemini5HrSub.c_str(), gemini5Hr);
-
-  // เส้นคั่นกลาง
-  tft.drawFastHLine(10, 108, 300, TFT_DARKGREY);
-
-  // --- Claude and GPT models ---
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextDatum(TL_DATUM); 
-  tft.setTextSize(2);
-  tft.drawString("Claude and GPT models", 10, 120);
-
-  drawStatRowFull(10, 144, "Weekly Limit Remaining", claudeWeeklySub.c_str(), claudeWeekly);
-  drawStatRowFull(10, 180, "Five Hour Limit Remaining", claude5HrSub.c_str(), claude5Hr);
-
-  // จำค่าปัจจุบันไว้
-  lastGeminiWeekly = geminiWeekly;
-  lastGemini5Hr = gemini5Hr;
-  lastClaudeWeekly = claudeWeekly;
-  lastClaude5Hr = claude5Hr;
-  lastGeminiWeeklySub = geminiWeeklySub;
-  lastGemini5HrSub = gemini5HrSub;
-  lastClaudeWeeklySub = claudeWeeklySub;
-  lastClaude5HrSub = claude5HrSub;
+  // ป้ายชื่อกลุ่มมุมขวาของแถวหัวข้อแรกในแต่ละแผง
+  tft.setTextSize(1);
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(SECTION_COLOR[0], PANEL_BG[0]);
+  tft.drawString(PANEL_TAG[0], 288, SECTION_Y[0] + 1);
+  tft.setTextColor(SECTION_COLOR[2], PANEL_BG[1]);
+  tft.drawString(PANEL_TAG[1], 312, SECTION_Y[2] + 1);
+  for (int i = 0; i < PCT_CARDS; i++) drawPctCardFull(i);
+  for (int i = 0; i < TOKEN_CARDS; i++) drawTokenCardFull(i);
 }
 
 // =========================================================================
 // อัปเดตเฉพาะส่วนที่เปลี่ยนแปลง ไม่ fillScreen ทั้งหน้า
 // =========================================================================
-void updateDashboardValues(int geminiWeekly, int gemini5Hr, int claudeWeekly, int claude5Hr,
-                           String geminiWeeklySub, String gemini5HrSub,
-                           String claudeWeeklySub, String claude5HrSub) {
+void updateDashboardValues() {
   // อัปเดตไอคอน WiFi เฉพาะเมื่อสถานะเปลี่ยน
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   if (isConnected != lastWiFiConnected) {
-    drawWiFiIcon(294, 2, isConnected);
+    drawWiFiIcon(294, 3, isConnected, PANEL_BG[0]);
     lastWiFiConnected = isConnected;
   }
 
-  // อัปเดตแต่ละ row (จะวาดตัวเลขและวงกลมเฉพาะเมื่อ % เปลี่ยน และวาดเวลาเฉพาะเมื่อ subtext เปลี่ยน)
-  updateStatRowValues(10, 32,  geminiWeeklySub, lastGeminiWeeklySub, geminiWeekly, lastGeminiWeekly);
-  updateStatRowValues(10, 68,  gemini5HrSub,    lastGemini5HrSub,    gemini5Hr,    lastGemini5Hr);
-  updateStatRowValues(10, 144, claudeWeeklySub, lastClaudeWeeklySub, claudeWeekly, lastClaudeWeekly);
-  updateStatRowValues(10, 180, claude5HrSub,    lastClaude5HrSub,    claude5Hr,    lastClaude5Hr);
-}
-
-// =========================================================================
-// วาด Row เต็ม (รวมกรอบสี่เหลี่ยมมุมโค้ง + ข้อความ + % + วงกลม)
-// =========================================================================
-void drawStatRowFull(int x, int y, const char* label, const char* subtext, int percent) {
-  int bx = x;
-  int by = y - 4;
-  int bw = 300;
-  int bh = 38;  // ความสูง card 38px
-
-  // 1. วาดกรอบสี่เหลี่ยมมุมโค้ง (Card Frame)
-  uint16_t borderColor = 0x4B0D; // สีเทาฟ้าสว่าง (Slate Grey)
-  tft.drawRoundRect(bx, by, bw, bh, 5, borderColor);
-
-  // 2. ข้อความหัวข้อ (Title)
-  tft.setTextSize(1);
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.setTextDatum(TL_DATUM);
-  tft.drawString(label, bx + 10, by + 6);
-
-  // 3. ข้อความ subtext (เวลานับถอยหลัง)
-  tft.fillRect(bx + 10, by + 22, 175, 11, TFT_BLACK);
-  if (String(subtext).length() > 0) {
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(subtext, bx + 10, by + 22);
-  }
-
-  // 4. ตัวเลข % โควต้า
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextDatum(TR_DATUM);
-  tft.drawNumber(percent, bx + 245, by + 10);
-  tft.drawString("%", bx + 263, by + 10);
-
-  // 5. กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
-  uint16_t statusColor = TFT_GREEN;
-  if (percent <= 20) {
-    statusColor = TFT_RED;
-  } else if (percent <= 50) {
-    statusColor = TFT_ORANGE;
-  }
-
-  drawProgressRing(bx + 283, by + 19, 10, 3, percent, statusColor);
-}
-
-// =========================================================================
-// อัปเดตเฉพาะค่าที่เปลี่ยน ภายในกรอบเดิม (ไม่วาดกรอบใหม่ ไม่วาด label ซ้ำ)
-// =========================================================================
-void updateStatRowValues(int x, int y, const String& subtext, String& lastSubtext, int percent, int& lastPercent) {
-  int bx = x;
-  int by = y - 4;
-
-  // 1. อัปเดต Subtext เฉพาะเมื่อข้อความมีการเปลี่ยนแปลง (เช่น นาทีเวลานับถอยหลังลดลง)
-  if (subtext != lastSubtext) {
-    tft.setTextSize(1);
-    tft.setTextDatum(TL_DATUM);
-    tft.fillRect(bx + 10, by + 22, 175, 11, TFT_BLACK);
-    if (subtext.length() > 0) {
-      tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      tft.drawString(subtext.c_str(), bx + 10, by + 22);
+  for (int i = 0; i < PCT_CARDS; i++) {
+    if (pctValue[i] != lastPctValue[i]) {
+      drawPctValue(i);
+      lastPctValue[i] = pctValue[i];
     }
-    lastSubtext = subtext;
+    if (pctReset[i] != lastPctReset[i]) {
+      drawPctReset(i);
+      lastPctReset[i] = pctReset[i];
+    }
   }
 
-  // 2. อัปเดตตัวเลข % และกราฟวงกลมเฉพาะเมื่อค่า % มีการเปลี่ยนแปลง
-  if (percent != lastPercent) {
-    // ล้างโซนตัวเลข % ภายในกรอบแล้ววาดใหม่
-    tft.fillRect(bx + 186, by + 5, 80, 28, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(TR_DATUM);
-    tft.drawNumber(percent, bx + 245, by + 10);
-    tft.drawString("%", bx + 263, by + 10);
-
-    // กำหนดสีของ Progress Ring ตามปริมาณที่เหลือ
-    uint16_t statusColor = TFT_GREEN;
-    if (percent <= 20) {
-      statusColor = TFT_RED;
-    } else if (percent <= 50) {
-      statusColor = TFT_ORANGE;
+  for (int i = 0; i < TOKEN_CARDS; i++) {
+    if (tokenTotal[i] != lastTokenTotal[i]) {
+      drawTokenTotal(i);
+      lastTokenTotal[i] = tokenTotal[i];
     }
-
-    // วาดวงกลม progress ring ใหม่
-    drawProgressRing(bx + 283, by + 19, 10, 3, percent, statusColor);
-    lastPercent = percent;
+    String detail = tokenDetailKey(i);
+    if (detail != lastTokenDetail[i]) {
+      drawTokenDetail(i);
+      lastTokenDetail[i] = detail;
+    }
   }
 }

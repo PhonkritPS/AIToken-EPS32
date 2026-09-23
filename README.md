@@ -10,6 +10,10 @@ A real-time hardware status monitor for AI Token quotas (Gemini Models & Claude/
 - **Smart Change Detection (Zero Flicker)**: Refreshes only values that change without clearing the entire screen.
 - **Countdown Reset Timers**: Displays accurate reset countdowns (e.g. in 4 hours, 15 min.).
 - **Wi-Fi Status Indicator**: Real-time connection icon with auto-reconnect.
+- **Single-Screen Layout**: Gemini, Claude & GPT (Antigravity) and Claude Code on one screen, each as a pair of half-width cards (Weekly | 5 Hour). Antigravity (navy panel) and Claude Code (warm brown panel) are grouped on separate background panels.
+- **Claude Code Usage**: Plan limits (weekly / 5-hour remaining) plus token usage for today and the current 5-hour window (in / out / cache).
+  - Limits come from the same endpoint used by Claude Code's `/usage`, using the local login in `~/.claude/.credentials.json` (polled every 60s).
+  - Token counts are summed from Claude Code's local logs in `~/.claude/projects/**/*.jsonl`.
 
 ---
 
