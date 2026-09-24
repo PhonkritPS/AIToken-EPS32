@@ -411,13 +411,25 @@ async function pollLoop() {
   } catch (e) {}
 
   const current = buildDynamicResponse();
-  const ccInfo = `| CC: ${current.cc5Hr}% / ${current.ccWeekly}% | CC Tokens 5Hr: ${current.ccWindowTokens}`;
+  const time = new Date().toLocaleTimeString();
+  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}% | Tok ${current.ccWindowTokens}`;
   if (current.ideRunning) {
-    process.stdout.write(`\r[${new Date().toLocaleTimeString()}] ✅ Antigravity IDE Online | Gemini: ${current.geminiWeekly}% (${current.gemini5Hr}%) | Claude: ${current.claudeWeekly}% (${current.claude5Hr}%) ${ccInfo}   `);
+    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}`);
   } else {
-    const sub = current.gemini5HrSubtext ? `(5Hr resets ${current.gemini5HrSubtext})` : `(Weekly resets ${current.geminiWeeklySubtext})`;
-    process.stdout.write(`\r[${new Date().toLocaleTimeString()}] ⏸️  Antigravity IDE Closed | Countdown Active ${sub} ${ccInfo}          `);
+    const sub = current.gemini5HrSubtext ? `5Hr ${current.gemini5HrSubtext}` : `Wk ${current.geminiWeeklySubtext}`;
+    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}`);
   }
+}
+
+// ปิดการตัดบรรทัดอัตโนมัติของ terminal (DECAWM) ข้อความที่ยาวเกินจะถูกตัดที่ขอบจอ ไม่ขึ้นบรรทัดใหม่
+process.stdout.write('\x1b[?7l');
+process.on('exit', () => process.stdout.write('\x1b[?7h\n'));
+process.on('SIGINT', () => process.exit(0));
+
+// เขียนสถานะทับบรรทัดเดิม (ตัดให้พอดีความกว้าง terminal เพื่อไม่ให้ขึ้นบรรทัดใหม่)
+function writeStatusLine(text) {
+  // \r = กลับต้นบรรทัด, \x1b[2K = ล้างทั้งบรรทัด
+  process.stdout.write(`\r\x1b[2K${text}`);
 }
 setInterval(pollLoop, 10000);
 pollLoop();
