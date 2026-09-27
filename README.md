@@ -31,6 +31,8 @@ ESP32-AITokenMonitor/
 
 ---
 
+> 📋 Setting up the bridge server on a **new machine**? Follow the step-by-step checklist in [SETUP.md](SETUP.md) instead — it's written to be followed top-to-bottom without prior context.
+
 ## 🚀 Getting Started
 
 ### 1. Requirements
