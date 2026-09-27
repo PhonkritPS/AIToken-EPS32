@@ -13,3 +13,6 @@ desktop.ini
 build/
 *.bin
 *.elf
+
+# Bridge server log (autostart)
+bridge.log

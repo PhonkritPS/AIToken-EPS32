@@ -63,3 +63,10 @@ On your computer where Antigravity IDE is running:
 node bridge_server.js
 `
 The server will start listening on port 5000 and provide the /api/quota endpoint for ESP32.
+
+### 6. Auto-start in background (optional)
+Register a Windows scheduled task that runs the bridge hidden at every logon (restarts automatically if it stops; log in `bridge.log`):
+```powershell
+powershell -ExecutionPolicy Bypass -File install_autostart.ps1              # install
+powershell -ExecutionPolicy Bypass -File install_autostart.ps1 -Uninstall   # remove
+```
