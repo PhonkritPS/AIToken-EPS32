@@ -11,7 +11,9 @@ const CACHE_FILE = path.join(__dirname, 'last_quota.json');
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CLAUDE_CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
-const CLAUDE_USAGE_INTERVAL = 60000; // ดึง % โควต้าจาก Anthropic ทุก 60 วินาที (ไม่ยิงถี่เกินไป)
+const CLAUDE_USAGE_INTERVAL = 180000; // ดึง % โควต้าจาก Anthropic ทุก 3 นาที (ป้องกันติด 429 Rate Limit)
+// โฟลเดอร์ใน projects ที่ไม่ใช่ session ของ Claude Code (เช่น scratch workspace ของ Claude Desktop) ไม่นำมานับ Token
+const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 
 // โครงสร้างข้อมูลหลัก พร้อมเก็บ resetTime (ISO string) เพื่อใช้นับถอยหลังจริงแม้ปิด IDE
 let quotaStore = {
@@ -154,10 +156,13 @@ async function getAntigravityQuotaLive() {
 // ใช้ access token ที่ Claude Code เก็บไว้ในเครื่อง (Claude Code จะ refresh token เองเมื่อหมดอายุ)
 // =========================================================================
 let lastCcUsageFetch = 0;
+let ccRetryUntil = 0;
 
 async function fetchClaudeCodeUsage() {
-  if (Date.now() - lastCcUsageFetch < CLAUDE_USAGE_INTERVAL) return;
-  lastCcUsageFetch = Date.now();
+  const now = Date.now();
+  if (now < ccRetryUntil) return;
+  if (now - lastCcUsageFetch < CLAUDE_USAGE_INTERVAL) return;
+  lastCcUsageFetch = now;
 
   try {
     const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
@@ -170,7 +175,16 @@ async function fetchClaudeCodeUsage() {
       },
       signal: AbortSignal.timeout(5000)
     });
-    if (!res.ok) return;
+
+    if (!res.ok) {
+      if (res.status === 429) {
+        const retrySec = parseInt(res.headers.get('retry-after') || '1800', 10);
+        ccRetryUntil = Date.now() + (retrySec * 1000);
+        const retryTime = new Date(ccRetryUntil).toLocaleTimeString();
+        process.stdout.write(`\n[${new Date().toLocaleTimeString()}] Claude Code API rate-limited (429). Pausing requests until ${retryTime} (~${Math.ceil(retrySec / 60)} min).\n`);
+      }
+      return;
+    }
 
     const data = await res.json();
     if (data.five_hour) {
@@ -205,6 +219,7 @@ function listJsonlFiles(dir, sinceMs, out = []) {
   for (const item of items) {
     const full = path.join(dir, item.name);
     if (item.isDirectory()) {
+      if (CLAUDE_EXCLUDE_PROJECT_DIRS.some((re) => re.test(item.name))) continue;
       listJsonlFiles(full, sinceMs, out);
     } else if (item.name.endsWith('.jsonl')) {
       try {
@@ -218,11 +233,12 @@ function listJsonlFiles(dir, sinceMs, out = []) {
 
 function parseJsonlFile(file) {
   const entries = [];
+  let lastContext = 0;
   let text;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch (e) {
-    return entries;
+    return { entries, lastContext: 0 };
   }
   for (const line of text.split('\n')) {
     if (!line.includes('"usage"')) continue;
@@ -231,17 +247,22 @@ function parseJsonlFile(file) {
       const msg = obj.message;
       if (!msg || !msg.usage || !obj.timestamp) continue;
       const u = msg.usage;
+      const inTok = u.input_tokens || 0;
+      const outTok = u.output_tokens || 0;
+      const cCreate = u.cache_creation_input_tokens || 0;
+      const cRead = u.cache_read_input_tokens || 0;
       entries.push({
         key: `${msg.id || ''}:${obj.requestId || ''}`,
         ts: Date.parse(obj.timestamp),
-        input: u.input_tokens || 0,
-        output: u.output_tokens || 0,
-        cacheCreate: u.cache_creation_input_tokens || 0,
-        cacheRead: u.cache_read_input_tokens || 0
+        input: inTok,
+        output: outTok,
+        cacheCreate: cCreate,
+        cacheRead: cRead
       });
+      lastContext = inTok + cCreate + cRead;
     } catch (e) {}
   }
-  return entries;
+  return { entries, lastContext };
 }
 
 function scanClaudeCodeTokens() {
@@ -259,12 +280,19 @@ function scanClaudeCodeTokens() {
   const win = empty();
   const today = empty();
   const seen = new Set(); // กันนับซ้ำ (ข้อความเดียวกันอาจถูกเขียนหลายบรรทัด/หลายไฟล์)
+  let activeContext = 0;
+  let latestMtime = 0;
 
   for (const { file, st } of files) {
     let cached = jsonlCache.get(file);
     if (!cached || cached.mtimeMs !== st.mtimeMs || cached.size !== st.size) {
-      cached = { mtimeMs: st.mtimeMs, size: st.size, entries: parseJsonlFile(file) };
+      const parsed = parseJsonlFile(file);
+      cached = { mtimeMs: st.mtimeMs, size: st.size, entries: parsed.entries, lastContext: parsed.lastContext };
       jsonlCache.set(file, cached);
+    }
+    if (st.mtimeMs > latestMtime && cached.lastContext > 0) {
+      latestMtime = st.mtimeMs;
+      activeContext = cached.lastContext;
     }
     for (const e of cached.entries) {
       if (e.ts < sinceMs || seen.has(e.key)) continue;
@@ -280,19 +308,21 @@ function scanClaudeCodeTokens() {
     }
   }
 
-  ccTokens = { window: win, today };
+  ccTokens = { window: win, today, activeContext };
 }
 
 // จัดรูปแบบตัวเลข Token ให้สั้น เช่น 1234 -> 1.2k, 1234567 -> 1.23M
 function formatTokens(n) {
+  if (!n || n <= 0) return "0";
   if (n < 1000) return `${n}`;
   if (n < 1e6) return `${(n / 1e3).toFixed(n < 1e4 ? 1 : 0)}k`;
   if (n < 1e9) return `${(n / 1e6).toFixed(n < 1e7 ? 2 : 1)}M`;
   return `${(n / 1e9).toFixed(n < 1e10 ? 2 : 1)}B`;
 }
 
+// New tokens: input (รวม cache creation) + output (ไม่นำ cacheRead ประวัติเดิมที่วนซ้ำมาบวกทับถม)
 function tokenTotal(t) {
-  return t.input + t.output + t.cacheCreate + t.cacheRead;
+  return t.input + t.cacheCreate + t.output;
 }
 
 // ส่งรายละเอียด token แยกเป็นฟิลด์ (prefix เช่น "ccWindow" -> ccWindowTokens, ccWindowIn, ...)
@@ -365,8 +395,10 @@ function buildDynamicResponse() {
 
   const ccW = calculateCountdown(quotaStore.ccWeeklyResetTime);
   const cc5 = calculateCountdown(quotaStore.cc5HrResetTime);
-  const ccWeeklyVal = (ccW.isExpired && quotaStore.ccWeekly < 100) ? 100 : quotaStore.ccWeekly;
-  const cc5HrVal = (cc5.isExpired && quotaStore.cc5Hr < 100) ? 100 : quotaStore.cc5Hr;
+
+  // สำหรับ Claude Code: ใช้ % โควต้าจริงจาก Anthropic API
+  const ccWeeklyVal = quotaStore.ccWeekly;
+  const cc5HrVal = quotaStore.cc5Hr;
 
   return {
     connected: quotaStore.connected || quotaStore.lastUpdated !== null,
@@ -389,6 +421,7 @@ function buildDynamicResponse() {
     cc5HrSubtext: cc5HrVal < 100 ? cc5.text : "",
     ccWeeklyReset: ccWeeklyVal < 100 ? ccW.short : "",
     cc5HrReset: cc5HrVal < 100 ? cc5.short : "",
+    ccActiveContext: formatTokens(ccTokens.activeContext || 0),
     ...tokenFields('ccWindow', ccTokens.window),
     ...tokenFields('ccToday', ccTokens.today),
     ccLastUpdated: quotaStore.ccLastUpdated,
@@ -412,7 +445,8 @@ async function pollLoop() {
 
   const current = buildDynamicResponse();
   const time = new Date().toLocaleTimeString();
-  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}% | Tok ${current.ccWindowTokens}`;
+  const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
+  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}% | Tok ${current.ccWindowTokens}${ctxStr}`;
   if (current.ideRunning) {
     writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}`);
   } else {
@@ -450,10 +484,22 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
+  const nets = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        ips.push(`${net.address} (${name})`);
+      }
+    }
+  }
+
   console.log(`=======================================================`);
   console.log(`🚀 Antigravity AI Quota Bridge Server is RUNNING!`);
   console.log(`📡 Local API endpoint: http://localhost:${PORT}/api/quota`);
-  console.log(`🌐 For ESP32 on Wi-Fi: http://192.168.10.33:${PORT}/api/quota`);
+  ips.forEach(ip => {
+    console.log(`🌐 For ESP32 on Wi-Fi: http://${ip.split(' ')[0]}:${PORT}/api/quota  [${ip.split(' ')[1] || ''}]`);
+  });
   console.log(`⏱️  Auto Real-time Countdown: Enabled even when IDE is closed!`);
   console.log(`=======================================================`);
 });

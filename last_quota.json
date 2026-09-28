@@ -1,18 +1,18 @@
 {
   "connected": true,
   "ideRunning": true,
-  "geminiWeekly": 83,
-  "gemini5Hr": 100,
+  "geminiWeekly": 66,
+  "gemini5Hr": 87,
   "geminiWeeklyResetTime": "2026-09-28T12:14:17Z",
-  "gemini5HrResetTime": "2026-09-27T07:48:39Z",
+  "gemini5HrResetTime": "2026-09-28T11:39:41Z",
   "claudeWeekly": 75,
   "claude5Hr": 100,
   "claudeWeeklyResetTime": "2026-09-28T14:34:47Z",
-  "claude5HrResetTime": "2026-09-27T07:48:39Z",
-  "ccWeekly": 84,
-  "cc5Hr": 53,
-  "ccWeeklyResetTime": "2026-10-03T13:00:00.344095+00:00",
-  "cc5HrResetTime": "2026-09-27T06:00:00.344074+00:00",
-  "ccLastUpdated": "09:45:51",
-  "lastUpdated": "09:51:41"
+  "claude5HrResetTime": "2026-09-28T13:25:36Z",
+  "ccWeekly": 72,
+  "cc5Hr": 83,
+  "ccWeeklyResetTime": "2026-10-03T13:00:00.355261+00:00",
+  "cc5HrResetTime": "2026-09-28T11:10:00.355229+00:00",
+  "ccLastUpdated": "15:25:06",
+  "lastUpdated": "15:26:16"
 }
