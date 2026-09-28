@@ -4,15 +4,15 @@
   "geminiWeekly": 100,
   "gemini5Hr": 100,
   "geminiWeeklyResetTime": "2026-10-05T12:14:17Z",
-  "gemini5HrResetTime": "2026-09-28T18:12:36Z",
+  "gemini5HrResetTime": "2026-09-28T18:42:36Z",
   "claudeWeekly": 75,
   "claude5Hr": 100,
   "claudeWeeklyResetTime": "2026-09-28T14:34:47Z",
-  "claude5HrResetTime": "2026-09-28T18:12:36Z",
+  "claude5HrResetTime": "2026-09-28T18:42:36Z",
   "ccWeekly": 70,
-  "cc5Hr": 88,
-  "ccWeeklyResetTime": "2026-10-03T13:00:00.625478+00:00",
-  "cc5HrResetTime": "2026-09-28T16:09:59.625449+00:00",
-  "ccLastUpdated": "20:12:50",
-  "lastUpdated": "20:15:10"
+  "cc5Hr": 86,
+  "ccWeeklyResetTime": "2026-10-03T13:00:00.682149+00:00",
+  "cc5HrResetTime": "2026-09-28T16:09:59.682129+00:00",
+  "ccLastUpdated": "20:46:15",
+  "lastUpdated": "20:46:25"
 }
