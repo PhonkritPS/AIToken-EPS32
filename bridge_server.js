@@ -21,6 +21,11 @@ const CODEX_AUTH_FILE = path.join(CODEX_DIR, 'auth.json');
 // เท่ากับรอบที่ Codex CLI ตัวจริงโพลเอง (เจอจากการ reverse-engineer ว่า client เรียก endpoint นี้ทุก 60 วิ)
 const CODEX_USAGE_INTERVAL = 60000;
 
+// 🧪 จำลองหน้าต่างที่สอง (secondary_window) ของ Codex ไว้ดูตัวอย่างก่อนอัปเกรดแพลนจริง
+// ใช้เฉพาะตอนแพลนปัจจุบันยังไม่มี secondary_window (เช่น Free) — พอไหนได้ค่าจริงจาก API
+// (หลังอัปเกรดเป็น Plus/Pro) จะใช้ค่าจริงแทนทันทีโดยไม่ต้องแก้อะไร ปิดจำลองได้ด้วยการตั้งเป็น false
+const CODEX_SIMULATE_SECONDARY = true;
+
 // โครงสร้างข้อมูลหลัก พร้อมเก็บ resetTime (ISO string) เพื่อใช้นับถอยหลังจริงแม้ปิด IDE
 let quotaStore = {
   connected: false,
@@ -273,6 +278,10 @@ async function fetchCodexUsage() {
     if (rl.secondary_window) {
       quotaStore.codexSecondaryPercent = Math.max(0, Math.round(100 - (rl.secondary_window.used_percent ?? 0)));
       quotaStore.codexSecondaryResetTime = rl.secondary_window.reset_at ? new Date(rl.secondary_window.reset_at * 1000).toISOString() : null;
+    } else if (CODEX_SIMULATE_SECONDARY) {
+      // ข้อมูลจำลอง (ไม่ใช่ของจริง) — เห็นตัวอย่างว่าถ้ามี secondary window (แบบ Plus/Pro) จอจะแสดงยังไง
+      quotaStore.codexSecondaryPercent = 58;
+      quotaStore.codexSecondaryResetTime = new Date(Date.now() + (4 * 24 + 6) * 3600 * 1000).toISOString();
     } else {
       quotaStore.codexSecondaryPercent = null;
       quotaStore.codexSecondaryResetTime = null;
