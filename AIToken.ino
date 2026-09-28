@@ -62,12 +62,19 @@ String ccRateLimitReset = "";
 bool lastCcRateLimited = false;
 String lastCcRateLimitReset = "";
 
+// เวลาข้อมูลอัปเดตล่าสุด: ต่อท้ายหัวข้อ Gemini Models (Antigravity) และ Plan Usage (Claude Code)
+String lastUpdatedTime = "";
+String ccLastUpdatedTime = "";
+String lastLastUpdatedTime = "";
+String lastCcLastUpdatedTime = "";
+
 // ประกาศฟังก์ชันล่วงหน้า
 void drawWiFiIcon(int x, int y, bool connected, uint16_t bg);
 void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bg);
 void drawDashboardFull();
 void updateDashboardValues();
 void drawClaudeCodeTag();
+void drawSectionUpdateTime(int s);
 void fetchAndDisplayQuota();
 
 void setup() {
@@ -157,6 +164,8 @@ void fetchAndDisplayQuota() {
       }
       ccRateLimited = doc["ccRateLimited"] | false;
       ccRateLimitReset = doc["ccRateLimitReset"] | "";
+      lastUpdatedTime = doc["lastUpdated"] | "";
+      ccLastUpdatedTime = doc["ccLastUpdated"] | "";
 
       if (isFirstDraw) {
         // ครั้งแรก: วาดหน้าจอทั้งหมด รวมถึงหัวข้อและกรอบการ์ด
@@ -372,6 +381,28 @@ void drawSectionHeader(int s) {
 }
 
 // =========================================================================
+// เวลาข้อมูลอัปเดตล่าสุด: ตัวหนังสือสีเทาเล็กๆ ต่อท้ายหัวข้อ (เฉพาะ Gemini Models กับ Plan Usage)
+// s=0 -> lastUpdated (Antigravity), s=2 -> ccLastUpdated (Claude Code)
+// =========================================================================
+void drawSectionUpdateTime(int s) {
+  int y = SECTION_Y[s];
+  int x = (s == 0) ? 96 : 78; // ต่อจากท้ายข้อความหัวข้อของแต่ละ section
+  uint16_t bg = PANEL_BG[sectionGroup(s)];
+  String t = (s == 0) ? lastUpdatedTime : ccLastUpdatedTime;
+
+  tft.fillRect(x, y, 54, 9, bg);
+  if (t.length() > 0) {
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(t, x, y + 1);
+  }
+
+  if (s == 0) lastLastUpdatedTime = t;
+  else lastCcLastUpdatedTime = t;
+}
+
+// =========================================================================
 // ป้ายมุมขวาบนของแผง Claude Code: ปกติโชว์ "CLAUDE CODE" แต่ถ้าโดน 429 Rate Limit
 // จะสลับเป็นข้อความเตือนสีแดงพร้อมเวลาที่เหลือ แล้วสลับกลับเองอัตโนมัติเมื่อ Retry-After หมดเวลา
 // =========================================================================
@@ -413,6 +444,8 @@ void drawDashboardFull() {
   lastWiFiConnected = isConnected;
 
   for (int s = 0; s < 3; s++) drawSectionHeader(s);
+  drawSectionUpdateTime(0);
+  drawSectionUpdateTime(2);
 
   // ป้ายชื่อกลุ่มมุมขวาของแถวหัวข้อแรกในแต่ละแผง
   tft.setTextSize(1);
@@ -438,6 +471,9 @@ void updateDashboardValues() {
   if (ccRateLimited != lastCcRateLimited || ccRateLimitReset != lastCcRateLimitReset) {
     drawClaudeCodeTag();
   }
+
+  if (lastUpdatedTime != lastLastUpdatedTime) drawSectionUpdateTime(0);
+  if (ccLastUpdatedTime != lastCcLastUpdatedTime) drawSectionUpdateTime(2);
 
   for (int i = 0; i < PCT_CARDS; i++) {
     if (pctValue[i] != lastPctValue[i]) {
