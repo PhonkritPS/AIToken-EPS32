@@ -56,11 +56,18 @@ const char* TOKEN_LABEL[TOKEN_CARDS] = { "Day Tokens", "5H Tokens" };
 String tokenTotal[TOKEN_CARDS], tokenIn[TOKEN_CARDS], tokenOut[TOKEN_CARDS], tokenCache[TOKEN_CARDS];
 String lastTokenTotal[TOKEN_CARDS], lastTokenDetail[TOKEN_CARDS];
 
+// แจ้งเตือน Claude Code โดน 429 Rate Limit (โผล่ที่ป้าย "CLAUDE CODE" แล้วหายไปเองเมื่อ Retry-After หมดเวลา)
+bool ccRateLimited = false;
+String ccRateLimitReset = "";
+bool lastCcRateLimited = false;
+String lastCcRateLimitReset = "";
+
 // ประกาศฟังก์ชันล่วงหน้า
 void drawWiFiIcon(int x, int y, bool connected, uint16_t bg);
 void drawProgressRing(int cx, int cy, int r, int thickness, int percent, uint16_t color, uint16_t bg);
 void drawDashboardFull();
 void updateDashboardValues();
+void drawClaudeCodeTag();
 void fetchAndDisplayQuota();
 
 void setup() {
@@ -148,6 +155,8 @@ void fetchAndDisplayQuota() {
         tokenOut[i] = doc[key + "Out"] | "-";
         tokenCache[i] = doc[key + "Cache"] | "-";
       }
+      ccRateLimited = doc["ccRateLimited"] | false;
+      ccRateLimitReset = doc["ccRateLimitReset"] | "";
 
       if (isFirstDraw) {
         // ครั้งแรก: วาดหน้าจอทั้งหมด รวมถึงหัวข้อและกรอบการ์ด
@@ -363,6 +372,31 @@ void drawSectionHeader(int s) {
 }
 
 // =========================================================================
+// ป้ายมุมขวาบนของแผง Claude Code: ปกติโชว์ "CLAUDE CODE" แต่ถ้าโดน 429 Rate Limit
+// จะสลับเป็นข้อความเตือนสีแดงพร้อมเวลาที่เหลือ แล้วสลับกลับเองอัตโนมัติเมื่อ Retry-After หมดเวลา
+// =========================================================================
+void drawClaudeCodeTag() {
+  int y = SECTION_Y[2];
+
+  // เคลียร์พื้นที่ป้ายก่อน (กว้างพอทั้งข้อความปกติและข้อความเตือนที่ยาวกว่า)
+  tft.fillRect(170, y, 144, 9, PANEL_BG[1]);
+
+  tft.setTextSize(1);
+  tft.setTextDatum(TR_DATUM);
+  if (ccRateLimited) {
+    String msg = "RATE LIMIT " + ccRateLimitReset;
+    tft.setTextColor(TFT_RED, PANEL_BG[1]);
+    tft.drawString(msg, 312, y + 1);
+  } else {
+    tft.setTextColor(SECTION_COLOR[2], PANEL_BG[1]);
+    tft.drawString(PANEL_TAG[1], 312, y + 1);
+  }
+
+  lastCcRateLimited = ccRateLimited;
+  lastCcRateLimitReset = ccRateLimitReset;
+}
+
+// =========================================================================
 // วาดหน้าจอทั้งหมด (ใช้ครั้งแรกเท่านั้น)
 // =========================================================================
 void drawDashboardFull() {
@@ -385,8 +419,7 @@ void drawDashboardFull() {
   tft.setTextDatum(TR_DATUM);
   tft.setTextColor(SECTION_COLOR[0], PANEL_BG[0]);
   tft.drawString(PANEL_TAG[0], 288, SECTION_Y[0] + 1);
-  tft.setTextColor(SECTION_COLOR[2], PANEL_BG[1]);
-  tft.drawString(PANEL_TAG[1], 312, SECTION_Y[2] + 1);
+  drawClaudeCodeTag();
   for (int i = 0; i < PCT_CARDS; i++) drawPctCardFull(i);
   for (int i = 0; i < TOKEN_CARDS; i++) drawTokenCardFull(i);
 }
@@ -400,6 +433,10 @@ void updateDashboardValues() {
   if (isConnected != lastWiFiConnected) {
     drawWiFiIcon(294, 3, isConnected, PANEL_BG[0]);
     lastWiFiConnected = isConnected;
+  }
+
+  if (ccRateLimited != lastCcRateLimited || ccRateLimitReset != lastCcRateLimitReset) {
+    drawClaudeCodeTag();
   }
 
   for (int i = 0; i < PCT_CARDS; i++) {

@@ -400,6 +400,15 @@ function buildDynamicResponse() {
   const ccWeeklyVal = quotaStore.ccWeekly;
   const cc5HrVal = quotaStore.cc5Hr;
 
+  // สถานะโดน 429 Rate Limit: true ระหว่างที่รอครบ Retry-After แล้วหายไปเองทันทีที่ครบเวลา
+  // (คำนวณสดทุกครั้งที่ตอบ request ไม่ผูกกับ field เดิมใน quotaStore เพื่อให้จอไหนก็ใช้ได้)
+  const ccRateLimitedNow = Date.now() < ccRetryUntil;
+  let ccRateLimitReset = "";
+  if (ccRateLimitedNow) {
+    const mins = Math.max(1, Math.ceil((ccRetryUntil - Date.now()) / 60000));
+    ccRateLimitReset = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  }
+
   return {
     connected: quotaStore.connected || quotaStore.lastUpdated !== null,
     ideRunning: quotaStore.ideRunning,
@@ -425,6 +434,9 @@ function buildDynamicResponse() {
     ...tokenFields('ccWindow', ccTokens.window),
     ...tokenFields('ccToday', ccTokens.today),
     ccLastUpdated: quotaStore.ccLastUpdated,
+    // สถานะแจ้งเตือน 429: จอไหนอยากโชว์เตือนก็เช็ค ccRateLimited ได้เลย ไม่ต้องรู้เรื่อง Retry-After เอง
+    ccRateLimited: ccRateLimitedNow,
+    ccRateLimitReset: ccRateLimitReset,
     lastUpdated: quotaStore.lastUpdated
   };
 }
