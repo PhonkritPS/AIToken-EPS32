@@ -15,6 +15,12 @@ const CLAUDE_USAGE_INTERVAL = 120000; // ดึง % โควต้าจาก
 // โฟลเดอร์ใน projects ที่ไม่ใช่ session ของ Claude Code (เช่น scratch workspace ของ Claude Desktop) ไม่นำมานับ Token
 const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 
+// OpenAI Codex CLI: โฟลเดอร์ config (รองรับ CODEX_HOME เหมือนตัว CLI)
+const CODEX_DIR = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+const CODEX_AUTH_FILE = path.join(CODEX_DIR, 'auth.json');
+// เท่ากับรอบที่ Codex CLI ตัวจริงโพลเอง (เจอจากการ reverse-engineer ว่า client เรียก endpoint นี้ทุก 60 วิ)
+const CODEX_USAGE_INTERVAL = 60000;
+
 // โครงสร้างข้อมูลหลัก พร้อมเก็บ resetTime (ISO string) เพื่อใช้นับถอยหลังจริงแม้ปิด IDE
 let quotaStore = {
   connected: false,
@@ -33,6 +39,14 @@ let quotaStore = {
   ccWeeklyResetTime: null,
   cc5HrResetTime: null,
   ccLastUpdated: null,
+  // OpenAI Codex (โควต้าตามแพลน ChatGPT ที่ผูกกับ Codex CLI)
+  codexConnected: false,
+  codexPlanType: null,
+  codexPrimaryPercent: null,   // null = ยังไม่เคยดึงสำเร็จ (แพลน Free จะมีแค่ช่องนี้ ไม่มี secondary)
+  codexPrimaryResetTime: null,
+  codexSecondaryPercent: null, // null = แพลนนี้ไม่มีหน้าต่างที่สอง (เช่น Free) หรือยังไม่เคยดึงสำเร็จ
+  codexSecondaryResetTime: null,
+  codexLastUpdated: null,
   lastUpdated: null
 };
 
@@ -201,6 +215,77 @@ async function fetchClaudeCodeUsage() {
       fs.writeFileSync(CACHE_FILE, JSON.stringify(quotaStore, null, 2));
     } catch (e) {}
   } catch (e) {}
+}
+
+// =========================================================================
+// OpenAI Codex: ดึงโควต้าจาก endpoint เดียวกับที่ Codex CLI ตัวจริงเรียกภายใน
+// (ไม่มีเอกสารทางการ พบจาก reverse-engineering ตัว CLI: GET .../wham/usage ด้วย
+// access token + account id จาก ~/.codex/auth.json)
+// โครงสร้าง response: rate_limit.primary_window / secondary_window แต่ละอันมี
+// used_percent (0-100) และ reset_at (unix seconds) — แพลน Free จะมีแค่ primary_window
+// (หน้าต่าง 30 วัน) ส่วน secondary_window เป็น null จนกว่าจะอัปเกรดเป็น Plus/Pro
+// =========================================================================
+let lastCodexUsageFetch = 0;
+let codexRetryUntil = 0;
+
+async function fetchCodexUsage() {
+  const now = Date.now();
+  if (now < codexRetryUntil) return;
+  if (now - lastCodexUsageFetch < CODEX_USAGE_INTERVAL) return;
+  lastCodexUsageFetch = now;
+
+  try {
+    const auth = JSON.parse(fs.readFileSync(CODEX_AUTH_FILE, 'utf8'));
+    const accessToken = auth?.tokens?.access_token;
+    const accountId = auth?.tokens?.account_id;
+    if (!accessToken) return; // ยังไม่ได้ login codex
+
+    const res = await fetch('https://chatgpt.com/backend-api/wham/usage', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'ChatGPT-Account-Id': accountId || ''
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!res.ok) {
+      if (res.status === 429) {
+        const retrySec = parseInt(res.headers.get('retry-after') || '1800', 10);
+        codexRetryUntil = Date.now() + (retrySec * 1000);
+        const retryTime = new Date(codexRetryUntil).toLocaleTimeString();
+        process.stdout.write(`\n[${new Date().toLocaleTimeString()}] Codex API rate-limited (429). Pausing requests until ${retryTime} (~${Math.ceil(retrySec / 60)} min).\n`);
+      }
+      return;
+    }
+
+    const data = await res.json();
+    quotaStore.codexConnected = true;
+    quotaStore.codexPlanType = data.plan_type || null;
+
+    const rl = data.rate_limit || {};
+    if (rl.primary_window) {
+      quotaStore.codexPrimaryPercent = Math.max(0, Math.round(100 - (rl.primary_window.used_percent ?? 0)));
+      quotaStore.codexPrimaryResetTime = rl.primary_window.reset_at ? new Date(rl.primary_window.reset_at * 1000).toISOString() : null;
+    } else {
+      quotaStore.codexPrimaryPercent = null;
+      quotaStore.codexPrimaryResetTime = null;
+    }
+    if (rl.secondary_window) {
+      quotaStore.codexSecondaryPercent = Math.max(0, Math.round(100 - (rl.secondary_window.used_percent ?? 0)));
+      quotaStore.codexSecondaryResetTime = rl.secondary_window.reset_at ? new Date(rl.secondary_window.reset_at * 1000).toISOString() : null;
+    } else {
+      quotaStore.codexSecondaryPercent = null;
+      quotaStore.codexSecondaryResetTime = null;
+    }
+
+    quotaStore.codexLastUpdated = new Date().toLocaleTimeString('th-TH');
+
+    try {
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(quotaStore, null, 2));
+    } catch (e) {}
+  } catch (e) {
+    // ไม่มีไฟล์ auth.json (ยังไม่ได้ login codex) หรืออ่านไม่ได้ -> ถือว่ายังไม่เชื่อมต่อ เงียบไว้
+  }
 }
 
 // =========================================================================
@@ -409,6 +494,19 @@ function buildDynamicResponse() {
     ccRateLimitReset = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   }
 
+  // Codex: ช่องไหนไม่เคยดึงสำเร็จ/แพลนไม่มีหน้าต่างนั้น (เช่น Free ไม่มี secondary) ส่ง -1 ให้จอรู้ว่าไม่ต้องวาด
+  const codexP = calculateCountdown(quotaStore.codexPrimaryResetTime);
+  const codexS = calculateCountdown(quotaStore.codexSecondaryResetTime);
+  const codexPrimaryVal = quotaStore.codexPrimaryPercent;
+  const codexSecondaryVal = quotaStore.codexSecondaryPercent;
+
+  const codexRateLimitedNow = Date.now() < codexRetryUntil;
+  let codexRateLimitReset = "";
+  if (codexRateLimitedNow) {
+    const mins = Math.max(1, Math.ceil((codexRetryUntil - Date.now()) / 60000));
+    codexRateLimitReset = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  }
+
   return {
     connected: quotaStore.connected || quotaStore.lastUpdated !== null,
     ideRunning: quotaStore.ideRunning,
@@ -437,6 +535,16 @@ function buildDynamicResponse() {
     // สถานะแจ้งเตือน 429: จอไหนอยากโชว์เตือนก็เช็ค ccRateLimited ได้เลย ไม่ต้องรู้เรื่อง Retry-After เอง
     ccRateLimited: ccRateLimitedNow,
     ccRateLimitReset: ccRateLimitReset,
+    codexConnected: quotaStore.codexConnected,
+    codexPlanType: quotaStore.codexPlanType,
+    // -1 = ไม่มีข้อมูล (แพลนนี้ไม่มีหน้าต่างนี้ หรือยังไม่เคยดึงสำเร็จ) จอควรข้ามไม่วาดช่องนี้
+    codexPrimaryPercent: (codexPrimaryVal === null || codexPrimaryVal === undefined) ? -1 : codexPrimaryVal,
+    codexPrimaryReset: (codexPrimaryVal !== null && codexPrimaryVal !== undefined && codexPrimaryVal < 100) ? codexP.short : "",
+    codexSecondaryPercent: (codexSecondaryVal === null || codexSecondaryVal === undefined) ? -1 : codexSecondaryVal,
+    codexSecondaryReset: (codexSecondaryVal !== null && codexSecondaryVal !== undefined && codexSecondaryVal < 100) ? codexS.short : "",
+    codexRateLimited: codexRateLimitedNow,
+    codexRateLimitReset: codexRateLimitReset,
+    codexLastUpdated: quotaStore.codexLastUpdated,
     lastUpdated: quotaStore.lastUpdated
   };
 }
@@ -451,6 +559,7 @@ async function pollLoop() {
   }
 
   await fetchClaudeCodeUsage();
+  await fetchCodexUsage();
   try {
     scanClaudeCodeTokens();
   } catch (e) {}
@@ -459,11 +568,14 @@ async function pollLoop() {
   const time = new Date().toLocaleTimeString();
   const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
   const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}% | Tok ${current.ccWindowTokens}${ctxStr}`;
+  const codexInfo = current.codexConnected
+    ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
+    : '';
   if (current.ideRunning) {
-    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}`);
+    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}`);
   } else {
     const sub = current.gemini5HrSubtext ? `5Hr ${current.gemini5HrSubtext}` : `Wk ${current.geminiWeeklySubtext}`;
-    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}`);
+    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}${codexInfo}`);
   }
 }
 

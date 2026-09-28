@@ -10,10 +10,13 @@ A real-time hardware status monitor for AI Token quotas (Gemini Models & Claude/
 - **Smart Change Detection (Zero Flicker)**: Refreshes only values that change without clearing the entire screen.
 - **Countdown Reset Timers**: Displays accurate reset countdowns (e.g. in 4 hours, 15 min.).
 - **Wi-Fi Status Indicator**: Real-time connection icon with auto-reconnect.
-- **Single-Screen Layout**: Gemini, Claude & GPT (Antigravity) and Claude Code on one screen, each as a pair of half-width cards (Weekly | 5 Hour). Antigravity (navy panel) and Claude Code (warm brown panel) are grouped on separate background panels.
-- **Claude Code Usage**: Plan limits (weekly / 5-hour remaining) plus token usage for today and the current 5-hour window (in / out / cache).
-  - Limits come from the same endpoint used by Claude Code's `/usage`, using the local login in `~/.claude/.credentials.json` (polled every 60s).
+- **Single-Screen, Compact-Row Layout**: Gemini, Claude & GPT, Claude Code and OpenAI Codex all on one screen — one row per provider (label + two percent rings + short reset countdown), grouped into 3 color-coded background panels (Antigravity navy, Claude Code brown, Codex teal).
+- **Claude Code Usage**: Plan limits (weekly / 5-hour remaining) plus token usage for today and the current 5-hour window.
+  - Limits come from the same endpoint used by Claude Code's `/usage`, using the local login in `~/.claude/.credentials.json`.
   - Token counts are summed from Claude Code's local logs in `~/.claude/projects/**/*.jsonl`.
+- **OpenAI Codex Usage**: Plan limits from the same undocumented endpoint the Codex CLI itself polls internally (`chatgpt.com/backend-api/wham/usage`), using the local login in `~/.codex/auth.json`. Free-tier accounts only expose one usage window (shown in the first slot); a second window (typically a weekly limit) appears automatically once upgraded to a paid ChatGPT plan.
+- **429 Rate-Limit Banner**: If either Claude Code's or Codex's usage endpoint returns 429, that panel's header swaps to a red "RATE LIMIT &lt;time left&gt;" warning and reverts on its own once the `Retry-After` window elapses.
+- **Last-Updated Timestamp**: Each panel header shows the last time its data was successfully refreshed.
 
 ---
 
