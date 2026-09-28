@@ -11,7 +11,7 @@ const CACHE_FILE = path.join(__dirname, 'last_quota.json');
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CLAUDE_CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
-const CLAUDE_USAGE_INTERVAL = 180000; // ดึง % โควต้าจาก Anthropic ทุก 3 นาที (ป้องกันติด 429 Rate Limit)
+const CLAUDE_USAGE_INTERVAL = 60000; // ดึง % โควต้าจาก Anthropic ทุก 60 วินาที (มี backoff รองรับ 429 ด้านล่างอยู่แล้ว)
 // โฟลเดอร์ใน projects ที่ไม่ใช่ session ของ Claude Code (เช่น scratch workspace ของ Claude Desktop) ไม่นำมานับ Token
 const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 
