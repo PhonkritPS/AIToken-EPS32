@@ -12,8 +12,8 @@ const char* password = "0817115775";
 // ตั้งค่า IP ของเครื่องคอมพิวเตอร์ที่รัน bridge_server.js
 const char* apiUrl = "http://192.168.10.99:5000/api/quota";
 
-// กำหนดรอบการดึงข้อมูล (ทุกๆ 15 วินาที)
-const unsigned long refreshInterval = 15000;
+// กำหนดรอบการดึงข้อมูล (ทุกๆ 10 วินาที)
+const unsigned long refreshInterval = 10000;
 unsigned long lastFetchTime = 0;
 
 // แฟลกสำหรับแยกว่าเป็นการวาดครั้งแรก (full draw) หรืออัปเดตบางส่วน (partial update)
@@ -26,15 +26,16 @@ bool lastWiFiConnected = false;
 // + % + เวลารีเซ็ตแบบย่อ ในแถวเดียวกัน (ไม่แยกเป็นการ์ดครึ่งจอเหมือนก่อนหน้า
 // เพื่อให้มีที่พอใส่ Codex เป็นผู้ให้บริการที่ 4 ได้โดยไม่ต้องสลับหน้า)
 // =========================================================================
-const int ROW_H = 26;                 // ความสูงแต่ละแถวข้อมูล
-const int HEADER_H[3] = { 24, 13, 13 }; // แผง 0 สูงกว่าเพราะมีไอคอน Wi-Fi
-const int PANEL_Y[3] = { 1, 84, 156 };
-const int PANEL_H[3] = { 79, 68, 42 };
+const int PANELS = 4;
+const int ROW_H = 25;                 // ความสูงแต่ละแถวข้อมูลทั่วไป
+const int HEADER_H[PANELS] = { 24, 13, 13, 13 }; // แผง 0 สูงกว่าเพราะมีไอคอน Wi-Fi
+const int PANEL_Y[PANELS]  = { 1, 81, 137, 183 };
+const int PANEL_H[PANELS]  = { 77, 53, 43, 54 };
 
-const uint16_t PANEL_BG[3]        = { 0x08C5, 0x28A1, 0x0903 }; // กรมท่า / น้ำตาลอมส้ม / เขียวอมฟ้าเข้ม
-const uint16_t PANEL_BORDER[3]    = { 0x4B0D, 0x6A06, 0x3CB1 };
-const uint16_t PANEL_TAG_COLOR[3] = { 0x443E, 0xDBAA, 0x56F7 };
-const char* PANEL_TAG[3] = { "ANTIGRAVITY", "CLAUDE CODE", "CODEX" };
+const uint16_t PANEL_BG[PANELS]        = { 0x08C5, 0x28A1, 0x0903, 0x0182 }; // กรมท่า / น้ำตาลอมส้ม / เขียวอมฟ้าเข้ม / เขียวเข้ม Cyber
+const uint16_t PANEL_BORDER[PANELS]    = { 0x4B0D, 0x6A06, 0x3CB1, 0x2D86 };
+const uint16_t PANEL_TAG_COLOR[PANELS] = { 0x443E, 0xDBAA, 0x56F7, 0x7FE0 }; // ฟ้า / ส้ม / มินต์ / เขียวมะนาว NVIDIA
+const char* PANEL_TAG[PANELS] = { "ANTIGRAVITY", "CLAUDE CODE", "CODEX", "SPARK LOCAL" };
 
 // ตำแหน่งคอลัมน์ในแต่ละแถว (label ซ้ายสุด, วงแหวน+ %+เวลารีเซ็ต 2 ชุดถัดไป)
 const int LABEL_X = 8;
@@ -64,12 +65,27 @@ String tokenToday = "-", tokenWindow = "-";
 String lastTokenToday = "", lastTokenWindow = "";
 
 // หัวแผง: เวลาอัปเดตล่าสุด (ทุกแผง) + สถานะ Rate Limit (เฉพาะแผง 1,2 เพราะดึงจาก internet API)
-String panelLastUpdated[3] = { "", "", "" };
-String lastPanelLastUpdated[3] = { "", "", "" };
+String panelLastUpdated[PANELS] = { "", "", "", "" };
+String lastPanelLastUpdated[PANELS] = { "", "", "", "" };
 bool panelRateLimited[2] = { false, false };       // [0]=Claude Code(แผง1), [1]=Codex(แผง2)
 String panelRateLimitReset[2] = { "", "" };
 bool lastPanelRateLimited[2] = { false, false };
 String lastPanelRateLimitReset[2] = { "", "" };
+
+// ข้อมูล Spark Local AI (Ollama model + % CPU + RAM)
+bool sparkConnected = false;
+String sparkModel = "Local AI";
+String sparkStatus = "Ready";
+int sparkCpu = 0;
+int sparkRam = 0;
+String sparkRamUsed = "0G";
+String sparkRamRatio = "0G/0G";
+int lastSparkCpu = -1;
+int lastSparkRam = -1;
+String lastSparkStatus = "";
+String lastSparkModel = "";
+String lastSparkRamRatio = "";
+bool lastSparkConnected = false;
 
 // ประกาศฟังก์ชันล่วงหน้า
 void drawWiFiIcon(int x, int y, bool connected, uint16_t bg);
@@ -82,6 +98,13 @@ void drawPctRowFull(int i);
 void updatePctRowValues(int i);
 void drawTokenRowFull();
 void updateTokenRowValues();
+void drawSparkRamSlot(int clearX, int clearW, int rowTop, int ringCx, int pctX, int textX,
+                      int percent, const String &ratio, uint16_t bg);
+void drawSparkCpuSlot(int clearX, int clearW, int rowTop, int ringCx, int pctX, int textX,
+                      int percent, uint16_t bg);
+void drawSparkRowFull();
+void updateSparkRowValues();
+uint16_t cpuColor(int percent);
 
 void setup() {
   Serial.begin(115200);
@@ -166,9 +189,18 @@ void fetchAndDisplayQuota() {
       tokenToday = doc["ccTodayTokens"] | "-";
       tokenWindow = doc["ccWindowTokens"] | "-";
 
+      sparkConnected = doc["sparkConnected"] | false;
+      sparkModel = doc["sparkModel"] | "Local AI";
+      sparkStatus = doc["sparkStatus"] | "Offline";
+      sparkCpu = doc["sparkCpu"] | 0;
+      sparkRam = doc["sparkRam"] | 0;
+      sparkRamUsed = doc["sparkRamUsed"] | "0G";
+      sparkRamRatio = doc["sparkRamRatio"] | "0G/0G";
+
       panelLastUpdated[0] = doc["lastUpdated"] | "";
       panelLastUpdated[1] = doc["ccLastUpdated"] | "";
       panelLastUpdated[2] = doc["codexLastUpdated"] | "";
+      panelLastUpdated[3] = doc["sparkLastUpdated"] | "";
 
       panelRateLimited[0] = doc["ccRateLimited"] | false;
       panelRateLimitReset[0] = doc["ccRateLimitReset"] | "";
@@ -265,9 +297,22 @@ uint16_t statusColor(int percent) {
   return TFT_GREEN;
 }
 
+// สีตาม % การใช้งาน CPU (ค่ายิ่งต่ำยิ่งดี: <=60% เขียว, <=85% ส้ม, >85% แดง)
+uint16_t cpuColor(int percent) {
+  if (percent >= 85) return TFT_RED;
+  if (percent >= 60) return TFT_ORANGE;
+  return TFT_GREEN;
+}
+
 // ตำแหน่ง Y บนสุดของแถวที่ i (คำนวณจากแผงและลำดับแถวในแผงนั้น)
 int rowTopY(int group, int indexInGroup) {
-  return PANEL_Y[group] + HEADER_H[group] + indexInGroup * ROW_H;
+  if (group == 0) {
+    return PANEL_Y[0] + HEADER_H[0] + indexInGroup * 26;
+  } else if (group == 1) {
+    return (indexInGroup == 0) ? (PANEL_Y[1] + HEADER_H[1]) : (PANEL_Y[1] + HEADER_H[1] + 24);
+  } else {
+    return PANEL_Y[group] + HEADER_H[group] + indexInGroup * ROW_H;
+  }
 }
 
 // =========================================================================
@@ -276,20 +321,24 @@ int rowTopY(int group, int indexInGroup) {
 // =========================================================================
 void drawPctSlot(int clearX, int clearW, int rowTop, int ringCx, int pctX, int resetX,
                  int value, const String &reset, uint16_t bg) {
-  tft.fillRect(clearX, rowTop, clearW, ROW_H, bg);
+  int slotH = (rowTop >= 90 && rowTop < 135) ? 23 : ROW_H;
+  tft.fillRect(clearX, rowTop, clearW, slotH, bg);
   if (value < 0) return; // ไม่มีข้อมูลช่องนี้ (เช่น Codex ยังไม่มีหน้าต่างที่สอง) -> เว้นว่าง
 
-  drawProgressRing(ringCx, rowTop + ROW_H / 2, RING_R, RING_THICK, value, statusColor(value), bg);
+  int ringCy = rowTop + (slotH / 2);
+  drawProgressRing(ringCx, ringCy, RING_R, RING_THICK, value, statusColor(value), bg);
 
   tft.setTextSize(2);
   tft.setTextColor(TFT_WHITE, bg);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(String(value) + "%", pctX, rowTop + 5);
+  int pctY = rowTop + (slotH - 16) / 2;
+  tft.drawString(String(value) + "%", pctX, pctY);
 
   if (reset.length() > 0) {
     tft.setTextSize(1);
     tft.setTextColor(TFT_DARKGREY, bg);
-    tft.drawString(reset, resetX, rowTop + 9);
+    int resetY = rowTop + (slotH - 8) / 2;
+    tft.drawString(reset, resetX, resetY);
   }
 }
 
@@ -297,11 +346,13 @@ void drawPctRowFull(int i) {
   int g = ROW_GROUP[i];
   int rowTop = rowTopY(g, ROW_INDEX[i]);
   uint16_t bg = PANEL_BG[g];
+  int slotH = (g == 1) ? 23 : ROW_H;
 
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, bg);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(ROW_LABEL[i], LABEL_X, rowTop + 9);
+  int labelY = rowTop + (slotH - 8) / 2;
+  tft.drawString(ROW_LABEL[i], LABEL_X, labelY);
 
   drawPctSlot(69, 128, rowTop, RING1_CX, PCT1_X, RESET1_X, pctValue1[i], pctReset1[i], bg);
   drawPctSlot(199, 117, rowTop, RING2_CX, PCT2_X, RESET2_X, pctValue2[i], pctReset2[i], bg);
@@ -330,33 +381,43 @@ void updatePctRowValues(int i) {
 }
 
 // =========================================================================
-// แถว Token ของ Claude Code (Day / 5 Hour) — ใช้กริดคอลัมน์เดียวกับแถว %
+// แถว Token ของ Claude Code (Day / 5 Hour) — กล่องตัวอักษรขนาดกะทัดรัด ตัวเลขสีขาวขนาดเท่ากับ Day
 // =========================================================================
-void drawTokenValue(int clearX, int clearW, int rowTop, int tagX, int valX,
-                    const char* tag, const String &val, uint16_t bg) {
-  tft.fillRect(clearX, rowTop, clearW, ROW_H, bg);
+void drawTokenValue(int boxX, int rowTop, const char* tag, const String &val, uint16_t panelBg) {
+  int boxW = 102;
+  int boxH = 15;
+  int boxY = rowTop;
+  uint16_t boxBg = 0x18C3;      // พื้นกล่องสีเข้มกว่าพื้นแผง Claude เล็กน้อย
+  uint16_t boxBorder = 0x41C5;  // ขอบกล่องสีส้มอมน้ำตาลจางๆ
+
+  tft.fillRoundRect(boxX, boxY, boxW, boxH, 3, boxBg);
+  tft.drawRoundRect(boxX, boxY, boxW, boxH, 3, boxBorder);
 
   tft.setTextSize(1);
-  tft.setTextColor(TFT_DARKGREY, bg);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString(tag, tagX, rowTop + 9);
 
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_CYAN, bg);
-  tft.drawString(val, valX, rowTop + 5);
+  // Tag (Day / 5H) สีส้มอมเทา
+  tft.setTextColor(0xDBAA, boxBg);
+  tft.drawString(tag, boxX + 6, boxY + 4);
+
+  // ตัวเลข Token ขนาด 1 เท่ากับคำว่า Day แต่เป็นสีขาวเห็นชัดเจน
+  tft.setTextColor(TFT_WHITE, boxBg);
+  int valX = boxX + (strlen(tag) * 6) + 12;
+  tft.drawString(val, valX, boxY + 4);
 }
 
 void drawTokenRowFull() {
   int rowTop = rowTopY(1, 1);
   uint16_t bg = PANEL_BG[1];
 
+  tft.fillRect(LABEL_X, rowTop, 60, 15, bg);
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, bg);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString("Tokens", LABEL_X, rowTop + 9);
+  tft.drawString("Tokens", LABEL_X, rowTop + 4);
 
-  drawTokenValue(69, 128, rowTop, RING1_CX, PCT1_X, "Day", tokenToday, bg);
-  drawTokenValue(199, 117, rowTop, RING2_CX, PCT2_X, "5H", tokenWindow, bg);
+  drawTokenValue(74, rowTop, "Day", tokenToday, bg);
+  drawTokenValue(204, rowTop, "5H", tokenWindow, bg);
 
   lastTokenToday = tokenToday;
   lastTokenWindow = tokenWindow;
@@ -367,17 +428,18 @@ void updateTokenRowValues() {
   uint16_t bg = PANEL_BG[1];
 
   if (tokenToday != lastTokenToday) {
-    drawTokenValue(69, 128, rowTop, RING1_CX, PCT1_X, "Day", tokenToday, bg);
+    drawTokenValue(74, rowTop, "Day", tokenToday, bg);
     lastTokenToday = tokenToday;
   }
   if (tokenWindow != lastTokenWindow) {
-    drawTokenValue(199, 117, rowTop, RING2_CX, PCT2_X, "5H", tokenWindow, bg);
+    drawTokenValue(204, rowTop, "5H", tokenWindow, bg);
     lastTokenWindow = tokenWindow;
   }
 }
 
 // =========================================================================
-// หัวแผง: เวลาอัปเดตล่าสุด (ซ้าย) + ป้ายชื่อกลุ่ม หรือคำเตือน Rate Limit (ขวา)
+// =========================================================================
+// หัวแผง: ชื่อกลุ่ม + เวลาอัปเดตล่าสุด (ซ้าย) + คำเตือน Rate Limit (ขวา)
 // แผง 0 (Antigravity) ไม่มี Rate Limit เพราะดึงจาก Language Server ในเครื่อง ไม่ใช่ internet API
 // =========================================================================
 void drawPanelHeader(int g) {
@@ -385,32 +447,160 @@ void drawPanelHeader(int g) {
   uint16_t bg = PANEL_BG[g];
   int textY = y + (HEADER_H[g] - 8) / 2;
 
-  // เวลาอัปเดตล่าสุด
-  tft.fillRect(LABEL_X, y, 100, HEADER_H[g] - 1, bg);
+  // เคลียร์โซนด้านหน้า (เว้น y+1 และความสูง -2 เพื่อไม่ให้ลบเส้นขอบบนของแผง)
+  tft.fillRect(LABEL_X, y + 1, 140, HEADER_H[g] - 2, bg);
   tft.setTextSize(1);
-  tft.setTextColor(TFT_DARKGREY, bg);
   tft.setTextDatum(TL_DATUM);
+
+  // 1. ชื่อ AI อยู่ด้านหน้า
+  tft.setTextColor(PANEL_TAG_COLOR[g], bg);
+  tft.drawString(PANEL_TAG[g], LABEL_X, textY);
+
+  // 2. ตามด้วยเวลา Last Update
   if (panelLastUpdated[g].length() > 0) {
-    tft.drawString(panelLastUpdated[g], LABEL_X, textY);
+    int timeX = LABEL_X + tft.textWidth(PANEL_TAG[g]) + 6;
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString(panelLastUpdated[g], timeX, textY);
   }
 
-  // ป้ายชื่อกลุ่ม / คำเตือน Rate Limit (เว้นที่ทางขวาสุดไว้ให้ไอคอน Wi-Fi ของแผง 0)
-  tft.fillRect(150, y, 136, HEADER_H[g] - 1, bg);
-  tft.setTextDatum(TR_DATUM);
-  int rlIdx = g - 1; // แผง1(Claude Code)->0, แผง2(Codex)->1, แผง0 ไม่มี
-  if (rlIdx >= 0 && panelRateLimited[rlIdx]) {
+  // 3. ป้ายเตือน Rate Limit ทางขวาสุด (ถ้ามี) หรือสถานะ + IP ของ Spark
+  tft.fillRect(135, y + 1, 178, HEADER_H[g] - 2, bg);
+  int rlIdx = g - 1; // แผง1(Claude Code)->0, แผง2(Codex)->1
+  if (rlIdx >= 0 && rlIdx < 2 && panelRateLimited[rlIdx]) {
     String msg = "RATE LIMIT " + panelRateLimitReset[rlIdx];
+    tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_RED, bg);
     tft.drawString(msg, 286, textY);
-  } else {
-    tft.setTextColor(PANEL_TAG_COLOR[g], bg);
-    tft.drawString(PANEL_TAG[g], 286, textY);
+  } else if (g == 3) {
+    // แสดงสถานะ Spark [Active] / [Ready] / [Offline] บน Header
+    tft.setTextDatum(TL_DATUM);
+    uint16_t statCol = (sparkStatus == "Active") ? TFT_GREEN : (sparkConnected ? TFT_CYAN : TFT_RED);
+    tft.setTextColor(statCol, bg);
+    tft.drawString("[" + sparkStatus + "]", 136, textY);
+
+    // IP ทางขวาสุด
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString("10.104.1.23", 310, textY);
   }
 
   lastPanelLastUpdated[g] = panelLastUpdated[g];
   if (rlIdx >= 0) {
     lastPanelRateLimited[rlIdx] = panelRateLimited[rlIdx];
     lastPanelRateLimitReset[rlIdx] = panelRateLimitReset[rlIdx];
+  }
+  if (g == 3) {
+    lastSparkStatus = sparkStatus;
+    lastSparkConnected = sparkConnected;
+  }
+}
+
+// =========================================================================
+// แถว Spark Local AI (โมเดลชื่อเต็ม + % RAM + % CPU) อยู่แผง 3
+// =========================================================================
+// =========================================================================
+// แถว Spark Local AI (โมเดลชื่อเต็ม + % RAM 77G/128G + % CPU) อยู่แผง 3
+// =========================================================================
+void drawSparkRamSlot(int clearX, int clearW, int rowTop, int ringCx, int pctX, int textX,
+                      int percent, const String &ratio, uint16_t bg) {
+  int slotH = 24;
+  tft.fillRect(clearX, rowTop, clearW, slotH, bg);
+  if (!sparkConnected) return;
+
+  int ringCy = rowTop + (slotH / 2);
+  drawProgressRing(ringCx, ringCy, RING_R, RING_THICK, percent, cpuColor(percent), bg);
+
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextDatum(TL_DATUM);
+  int pctY = rowTop + (slotH - 16) / 2;
+  tft.drawString(String(percent) + "%", pctX, pctY);
+
+  tft.setTextSize(1);
+  tft.setTextColor(0x7FE0, bg); // สีเขียวมะนาว/มินต์ สำหรับคำว่า RAM
+  tft.drawString("RAM", textX, rowTop + 3);
+
+  tft.setTextColor(TFT_WHITE, bg); // สีขาวตัวเลข เช่น 77G/128G
+  tft.drawString(ratio, textX, rowTop + 13);
+}
+
+void drawSparkCpuSlot(int clearX, int clearW, int rowTop, int ringCx, int pctX, int textX,
+                      int percent, uint16_t bg) {
+  int slotH = 24;
+  tft.fillRect(clearX, rowTop, clearW, slotH, bg);
+  if (!sparkConnected) return;
+
+  int ringCy = rowTop + (slotH / 2);
+  drawProgressRing(ringCx, ringCy, RING_R, RING_THICK, percent, cpuColor(percent), bg);
+
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextDatum(TL_DATUM);
+  int pctY = rowTop + (slotH - 16) / 2;
+  tft.drawString(String(percent) + "%", pctX, pctY);
+
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  int resetY = rowTop + (slotH - 8) / 2;
+  tft.drawString("CPU", textX, resetY);
+}
+
+void drawSparkRowFull() {
+  int modelTop = PANEL_Y[3] + HEADER_H[3];
+  int rowTop = modelTop + 13;
+  uint16_t bg = PANEL_BG[3];
+
+  // 1. บรรทัดชื่อโมเดล AI (กว้างเต็มจอ x=8 ถึง x=310)
+  tft.fillRect(LABEL_X, modelTop + 1, 302, 12, bg);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(sparkModel, LABEL_X, modelTop + 3);
+
+  // 2. บรรทัด Resource Telemetry (RAM & CPU)
+  tft.fillRect(LABEL_X, rowTop, 60, 24, bg);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_LIGHTGREY, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString("Usage", LABEL_X, rowTop + 8);
+
+  // ช่อง RAM (Column 1: Ring + % + RAM 77G/128G)
+  drawSparkRamSlot(69, 128, rowTop, RING1_CX, PCT1_X, 135, sparkRam, sparkRamRatio, bg);
+
+  // ช่อง CPU (Column 2: Ring + % + CPU)
+  drawSparkCpuSlot(199, 117, rowTop, RING2_CX, PCT2_X, RESET2_X, sparkCpu, bg);
+
+  lastSparkCpu = sparkCpu;
+  lastSparkRam = sparkRam;
+  lastSparkRamRatio = sparkRamRatio;
+  lastSparkStatus = sparkStatus;
+  lastSparkModel = sparkModel;
+  lastSparkConnected = sparkConnected;
+}
+
+void updateSparkRowValues() {
+  int modelTop = PANEL_Y[3] + HEADER_H[3];
+  int rowTop = modelTop + 13;
+  uint16_t bg = PANEL_BG[3];
+
+  if (sparkModel != lastSparkModel) {
+    tft.fillRect(LABEL_X, modelTop + 1, 302, 12, bg);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, bg);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(sparkModel, LABEL_X, modelTop + 3);
+    lastSparkModel = sparkModel;
+  }
+
+  if (sparkRam != lastSparkRam || sparkRamRatio != lastSparkRamRatio) {
+    drawSparkRamSlot(69, 128, rowTop, RING1_CX, PCT1_X, 135, sparkRam, sparkRamRatio, bg);
+    lastSparkRam = sparkRam;
+    lastSparkRamRatio = sparkRamRatio;
+  }
+
+  if (sparkCpu != lastSparkCpu) {
+    drawSparkCpuSlot(199, 117, rowTop, RING2_CX, PCT2_X, RESET2_X, sparkCpu, bg);
+    lastSparkCpu = sparkCpu;
   }
 }
 
@@ -420,18 +610,20 @@ void drawPanelHeader(int g) {
 void drawDashboardFull() {
   tft.fillScreen(TFT_BLACK);
 
-  // พื้นหลังแผงทั้ง 3
-  for (int g = 0; g < 3; g++) {
+  // พื้นหลังและกรอบแผงทั้ง 4
+  for (int g = 0; g < PANELS; g++) {
     tft.fillRoundRect(1, PANEL_Y[g], 318, PANEL_H[g], 6, PANEL_BG[g]);
+    tft.drawRoundRect(1, PANEL_Y[g], 318, PANEL_H[g], 6, PANEL_BORDER[g]);
   }
 
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   drawWiFiIcon(290, 4, isConnected, PANEL_BG[0]);
   lastWiFiConnected = isConnected;
 
-  for (int g = 0; g < 3; g++) drawPanelHeader(g);
+  for (int g = 0; g < PANELS; g++) drawPanelHeader(g);
   for (int i = 0; i < PCT_ROWS; i++) drawPctRowFull(i);
   drawTokenRowFull();
+  drawSparkRowFull();
 }
 
 // =========================================================================
@@ -444,16 +636,18 @@ void updateDashboardValues() {
     lastWiFiConnected = isConnected;
   }
 
-  for (int g = 0; g < 3; g++) {
+  for (int g = 0; g < PANELS; g++) {
     int rlIdx = g - 1;
-    bool rlChanged = (rlIdx >= 0) &&
+    bool rlChanged = (rlIdx >= 0 && rlIdx < 2) &&
                      (panelRateLimited[rlIdx] != lastPanelRateLimited[rlIdx] ||
                       panelRateLimitReset[rlIdx] != lastPanelRateLimitReset[rlIdx]);
-    if (panelLastUpdated[g] != lastPanelLastUpdated[g] || rlChanged) {
+    bool sparkHeaderChanged = (g == 3 && (sparkStatus != lastSparkStatus || sparkConnected != lastSparkConnected));
+    if (panelLastUpdated[g] != lastPanelLastUpdated[g] || rlChanged || sparkHeaderChanged) {
       drawPanelHeader(g);
     }
   }
 
   for (int i = 0; i < PCT_ROWS; i++) updatePctRowValues(i);
   updateTokenRowValues();
+  updateSparkRowValues();
 }

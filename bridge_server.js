@@ -2,10 +2,17 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 
 const PORT = 5000;
 const CACHE_FILE = path.join(__dirname, 'last_quota.json');
+
+// Spark Local AI (10.104.1.23)
+const SPARK_HOST = '10.104.1.23';
+const SPARK_SSH_USER = 'admin';
+const SPARK_USAGE_INTERVAL = 10000; // ตรวจสอบทุก 10 วินาที
+let lastSparkPoll = 0;
+let isSparkPolling = false;
 
 // Claude Code: โฟลเดอร์ config (รองรับ CLAUDE_CONFIG_DIR เหมือนตัว CLI)
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -52,6 +59,16 @@ let quotaStore = {
   codexSecondaryPercent: null, // null = แพลนนี้ไม่มีหน้าต่างที่สอง (เช่น Free) หรือยังไม่เคยดึงสำเร็จ
   codexSecondaryResetTime: null,
   codexLastUpdated: null,
+  // Spark Local AI (Ollama on 10.104.1.23)
+  sparkConnected: false,
+  sparkModel: 'Local AI',
+  sparkStatus: 'Offline',
+  sparkCpu: 0,
+  sparkRam: 0,
+  sparkRamUsed: '0G',
+  sparkRamTotal: '0G',
+  sparkRamRatio: '0G/0G',
+  sparkLastUpdated: null,
   lastUpdated: null
 };
 
@@ -294,6 +311,122 @@ async function fetchCodexUsage() {
     } catch (e) {}
   } catch (e) {
     // ไม่มีไฟล์ auth.json (ยังไม่ได้ login codex) หรืออ่านไม่ได้ -> ถือว่ายังไม่เชื่อมต่อ เงียบไว้
+  }
+}
+
+// =========================================================================
+// Spark Local AI: ตรวจสอบสถานะ Ollama / Local AI (Port 8188 / 11434) และ % CPU
+// =========================================================================
+function formatOllamaModel(raw) {
+  if (!raw) return 'Local AI';
+  let name = raw.trim();
+  // ตัดแท็ก :latest ออก เพื่อความสะอาดตา แต่คงแท็กอื่นเช่น :70b, :cloud ไว้
+  name = name.replace(/:latest$/i, '');
+  // ตัด prefix repository/path เช่น hf.co/.../ ถ้ามี
+  if (name.includes('/')) {
+    const parts = name.split('/');
+    name = parts[parts.length - 1];
+  }
+  // จัดการกรณี HuggingFace tag ซ้ำซ้อน เช่น Model:Model-Q6_K.gguf
+  if (name.includes(':')) {
+    const [base, tag] = name.split(':');
+    if (tag.endsWith('.gguf')) {
+      name = tag.replace(/\.gguf$/i, '');
+    }
+  }
+  name = name.replace(/\.gguf$/i, '');
+  // ไม่ตัดทอนคำแล้ว รองรับชื่อเต็มได้ถึง 29 ตัวอักษรบนหน้าจอ TFT
+  if (name.length > 29) {
+    name = name.substring(0, 27) + '..';
+  }
+  return name;
+}
+
+async function fetchSparkStatus() {
+  const now = Date.now();
+  if (now - lastSparkPoll < SPARK_USAGE_INTERVAL) return;
+  if (isSparkPolling) return;
+  lastSparkPoll = now;
+  isSparkPolling = true;
+
+  try {
+    // 1. ตรวจสอบ Ollama / Local AI บน Port 8188 เป็นหลัก (fallback 11434)
+    const candidatePorts = [8188, 11434];
+    let detectedModel = null;
+    let modelStatus = 'Ready';
+    let localAiOk = false;
+
+    for (const port of candidatePorts) {
+      try {
+        // ตรวจสอบโมเดลที่กำลัง active ใน VRAM/Memory (/api/ps)
+        const psRes = await fetch(`http://${SPARK_HOST}:${port}/api/ps`, { signal: AbortSignal.timeout(2000) });
+        if (psRes.ok) {
+          const psData = await psRes.json();
+          if (Array.isArray(psData.models) && psData.models.length > 0) {
+            localAiOk = true;
+            modelStatus = 'Active';
+            detectedModel = formatOllamaModel(psData.models[0].name || psData.models[0].model);
+            break;
+          }
+        }
+
+        // ตรวจสอบโมเดลที่ติดตั้งไว้ในคอนเทนเนอร์ (/api/tags)
+        const tagsRes = await fetch(`http://${SPARK_HOST}:${port}/api/tags`, { signal: AbortSignal.timeout(2000) });
+        if (tagsRes.ok) {
+          const tagsData = await tagsRes.json();
+          if (Array.isArray(tagsData.models) && tagsData.models.length > 0) {
+            localAiOk = true;
+            modelStatus = 'Ready';
+            // เลือกโมเดลที่เป็น Local จริง (ไม่ลงท้ายด้วย :cloud) เป็นลำดับแรก
+            const localM = tagsData.models.find(m => {
+              const n = m.name || m.model || '';
+              return !n.endsWith(':cloud');
+            }) || tagsData.models[0];
+            detectedModel = formatOllamaModel(localM.name || localM.model);
+            break;
+          }
+        }
+      } catch (e) {
+        // พอร์ตนี้อาจไม่ใช่ Ollama ลองพอร์ตถัดไป
+      }
+    }
+
+    // 2. ดึง % CPU และ RAM ผ่าน SSH (non-blocking)
+    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; free -m"`;
+    exec(sshCmd, (err, stdout) => {
+      isSparkPolling = false;
+      if (err) {
+        quotaStore.sparkConnected = localAiOk;
+        quotaStore.sparkStatus = localAiOk ? modelStatus : 'Offline';
+        if (localAiOk) quotaStore.sparkLastUpdated = new Date().toLocaleTimeString('th-TH');
+        return;
+      }
+
+      quotaStore.sparkConnected = true;
+      const mCpu = stdout.match(/(\d+\.?\d*)\s*id/);
+      quotaStore.sparkCpu = mCpu ? Math.max(0, Math.min(100, Math.round(100 - parseFloat(mCpu[1])))) : 0;
+
+      const mMem = stdout.match(/Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+      if (mMem) {
+        const total = parseInt(mMem[1], 10);
+        const used = parseInt(mMem[2], 10);
+        quotaStore.sparkRam = Math.max(0, Math.min(100, Math.round((used / total) * 100)));
+        const usedGb = Math.round(used / 1024) + 'G';
+        let totalGb = Math.round(total / 1024) + 'G';
+        if (total >= 115000 && total <= 135000) totalGb = '128G';
+        else if (total >= 58000 && total <= 70000) totalGb = '64G';
+        else if (total >= 28000 && total <= 35000) totalGb = '32G';
+        quotaStore.sparkRamUsed = usedGb;
+        quotaStore.sparkRamTotal = totalGb;
+        quotaStore.sparkRamRatio = `${usedGb}/${totalGb}`;
+      }
+
+      quotaStore.sparkModel = detectedModel || quotaStore.sparkModel || 'Local AI';
+      quotaStore.sparkStatus = localAiOk ? modelStatus : 'Offline';
+      quotaStore.sparkLastUpdated = new Date().toLocaleTimeString('th-TH');
+    });
+  } catch (e) {
+    isSparkPolling = false;
   }
 }
 
@@ -554,6 +687,15 @@ function buildDynamicResponse() {
     codexRateLimited: codexRateLimitedNow,
     codexRateLimitReset: codexRateLimitReset,
     codexLastUpdated: quotaStore.codexLastUpdated,
+    sparkConnected: quotaStore.sparkConnected,
+    sparkModel: quotaStore.sparkModel || 'Local AI',
+    sparkStatus: quotaStore.sparkStatus || 'Offline',
+    sparkCpu: quotaStore.sparkCpu ?? 0,
+    sparkRam: quotaStore.sparkRam ?? 0,
+    sparkRamUsed: quotaStore.sparkRamUsed || '0G',
+    sparkRamTotal: quotaStore.sparkRamTotal || '0G',
+    sparkRamRatio: quotaStore.sparkRamRatio || '0G/0G',
+    sparkLastUpdated: quotaStore.sparkLastUpdated || '',
     lastUpdated: quotaStore.lastUpdated
   };
 }
@@ -569,6 +711,7 @@ async function pollLoop() {
 
   await fetchClaudeCodeUsage();
   await fetchCodexUsage();
+  await fetchSparkStatus();
   try {
     scanClaudeCodeTokens();
   } catch (e) {}
@@ -580,11 +723,14 @@ async function pollLoop() {
   const codexInfo = current.codexConnected
     ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
     : '';
+  const sparkInfo = current.sparkConnected
+    ? ` | Spark ${current.sparkModel}(${current.sparkStatus}) CPU ${current.sparkCpu}% RAM ${current.sparkRam}%(${current.sparkRamRatio})`
+    : '';
   if (current.ideRunning) {
-    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}`);
+    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}${sparkInfo}`);
   } else {
     const sub = current.gemini5HrSubtext ? `5Hr ${current.gemini5HrSubtext}` : `Wk ${current.geminiWeeklySubtext}`;
-    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}${codexInfo}`);
+    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}${codexInfo}${sparkInfo}`);
   }
 }
 
