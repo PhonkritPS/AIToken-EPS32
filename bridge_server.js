@@ -68,6 +68,11 @@ let quotaStore = {
   sparkRamUsed: '0G',
   sparkRamTotal: '0G',
   sparkRamRatio: '0G/0G',
+  sparkTotalTokens: '0',
+  sparkTodayTokens: '0',
+  sparkSavedCost: '$0',
+  sparkSavedThb: '฿0',
+  sparkSpeed: '',
   sparkLastUpdated: null,
   lastUpdated: null
 };
@@ -392,7 +397,7 @@ async function fetchSparkStatus() {
     }
 
     // 2. ดึง % CPU และ RAM ผ่าน SSH (non-blocking)
-    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; free -m"`;
+    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; echo ===FREE===; free -m; echo ===TOKENS===; python3 /home/admin/spark_tokens.py 2>/dev/null || echo 0,0,0,0"`;
     exec(sshCmd, (err, stdout) => {
       isSparkPolling = false;
       if (err) {
@@ -419,6 +424,22 @@ async function fetchSparkStatus() {
         quotaStore.sparkRamUsed = usedGb;
         quotaStore.sparkRamTotal = totalGb;
         quotaStore.sparkRamRatio = `${usedGb}/${totalGb}`;
+      }
+
+      // ดึงข้อมูล Tokens จาก Docker Logs
+      const mTok = stdout.match(/===TOKENS===\s*([\d\.,]+)/);
+      if (mTok) {
+        const parts = mTok[1].trim().split(',');
+        const totalTok = parseInt(parts[0], 10) || 0;
+        const todayTok = parseInt(parts[1], 10) || 0;
+        const savedUsd = parseFloat(parts[2]) || 0;
+        const savedThb = parseInt(parts[3], 10) || 0;
+        quotaStore.sparkTotalTokens = formatTokens(totalTok);
+        quotaStore.sparkTodayTokens = formatTokens(todayTok);
+        quotaStore.sparkSavedCost = savedUsd > 0 ? `~$${Math.round(savedUsd)}` : '$0';
+        quotaStore.sparkSavedThb = savedThb > 0 ? `฿${formatTokens(savedThb)}` : '฿0';
+        const speedVal = parseFloat(parts[4]) || 0;
+        quotaStore.sparkSpeed = speedVal > 0 ? `${Math.round(speedVal)} t/s` : '';
       }
 
       quotaStore.sparkModel = detectedModel || quotaStore.sparkModel || 'Local AI';
@@ -695,6 +716,11 @@ function buildDynamicResponse() {
     sparkRamUsed: quotaStore.sparkRamUsed || '0G',
     sparkRamTotal: quotaStore.sparkRamTotal || '0G',
     sparkRamRatio: quotaStore.sparkRamRatio || '0G/0G',
+    sparkTotalTokens: quotaStore.sparkTotalTokens || '0',
+    sparkTodayTokens: quotaStore.sparkTodayTokens || '0',
+    sparkSavedCost: quotaStore.sparkSavedCost || '$0',
+    sparkSavedThb: quotaStore.sparkSavedThb || '฿0',
+    sparkSpeed: quotaStore.sparkSpeed || '',
     sparkLastUpdated: quotaStore.sparkLastUpdated || '',
     lastUpdated: quotaStore.lastUpdated
   };
@@ -724,7 +750,7 @@ async function pollLoop() {
     ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
     : '';
   const sparkInfo = current.sparkConnected
-    ? ` | Spark ${current.sparkModel}(${current.sparkStatus}) CPU ${current.sparkCpu}% RAM ${current.sparkRam}%(${current.sparkRamRatio})`
+    ? ` | Spark ${current.sparkModel}(${current.sparkStatus}) CPU ${current.sparkCpu}% RAM ${current.sparkRam}%(${current.sparkRamRatio}) Tok ${current.sparkTotalTokens}(Save ${current.sparkSavedCost})`
     : '';
   if (current.ideRunning) {
     writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}${sparkInfo}`);
