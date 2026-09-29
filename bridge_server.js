@@ -50,6 +50,7 @@ let quotaStore = {
   cc5Hr: 100,
   ccWeeklyResetTime: null,
   cc5HrResetTime: null,
+  ccPlanType: null,
   ccLastUpdated: null,
   // OpenAI Codex (โควต้าตามแพลน ChatGPT ที่ผูกกับ Codex CLI)
   codexConnected: false,
@@ -88,6 +89,10 @@ try {
   if (fs.existsSync(CACHE_FILE)) {
     const saved = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
     quotaStore = { ...quotaStore, ...saved, ideRunning: false };
+  }
+  if (fs.existsSync(CLAUDE_CREDS_FILE)) {
+    const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
+    if (creds && creds.subscriptionType) quotaStore.ccPlanType = creds.subscriptionType;
   }
 } catch (e) {}
 
@@ -207,6 +212,7 @@ async function fetchClaudeCodeUsage() {
 
   try {
     const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
+    if (creds && creds.subscriptionType) quotaStore.ccPlanType = creds.subscriptionType;
     if (!creds || !creds.accessToken) return;
 
     const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
@@ -695,6 +701,7 @@ function buildDynamicResponse() {
     ...tokenFields('ccWindow', ccTokens.window),
     ...tokenFields('ccToday', ccTokens.today),
     ccLastUpdated: quotaStore.ccLastUpdated,
+    ccPlanType: quotaStore.ccPlanType,
     // สถานะแจ้งเตือน 429: จอไหนอยากโชว์เตือนก็เช็ค ccRateLimited ได้เลย ไม่ต้องรู้เรื่อง Retry-After เอง
     ccRateLimited: ccRateLimitedNow,
     ccRateLimitReset: ccRateLimitReset,
