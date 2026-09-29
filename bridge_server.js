@@ -18,7 +18,7 @@ let isSparkPolling = false;
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CLAUDE_CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
-const CLAUDE_USAGE_INTERVAL = 120000; // ดึง % โควต้าจาก Anthropic ทุก 2 นาที (ทดลอง: 60 วิเจอ 429 หนัก, 180 วิสะอาด — ถ้า 120 วิโดนบ่อย จอจะขึ้น "RATE LIMIT" เตือนเอง)
+const CLAUDE_USAGE_INTERVAL = 180000; // ดึง % โควต้าจาก Anthropic ทุก 3 นาที (180 วิ เพื่อป้องกัน 429 Rate Limit)
 // โฟลเดอร์ใน projects ที่ไม่ใช่ session ของ Claude Code (เช่น scratch workspace ของ Claude Desktop) ไม่นำมานับ Token
 const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 
@@ -26,7 +26,7 @@ const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 const CODEX_DIR = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_AUTH_FILE = path.join(CODEX_DIR, 'auth.json');
 // เท่ากับรอบที่ Codex CLI ตัวจริงโพลเอง (เจอจากการ reverse-engineer ว่า client เรียก endpoint นี้ทุก 60 วิ)
-const CODEX_USAGE_INTERVAL = 60000;
+const CODEX_USAGE_INTERVAL = 120000; // ดึง % โควต้าจาก OpenAI Codex ทุก 2 นาที (120 วิ เพื่อความปลอดภัย)
 
 // 🧪 จำลองหน้าต่างที่สอง (secondary_window) ของ Codex ไว้ดูตัวอย่างก่อนอัปเกรดแพลนจริง
 // ใช้เฉพาะตอนแพลนปัจจุบันยังไม่มี secondary_window (เช่น Free) — พอไหนได้ค่าจริงจาก API
