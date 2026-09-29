@@ -485,7 +485,7 @@ void drawPanelHeader(int g) {
   }
 
   lastPanelLastUpdated[g] = panelLastUpdated[g];
-  if (rlIdx >= 0) {
+  if (rlIdx >= 0 && rlIdx < 2) {
     lastPanelRateLimited[rlIdx] = panelRateLimited[rlIdx];
     lastPanelRateLimitReset[rlIdx] = panelRateLimitReset[rlIdx];
   }
