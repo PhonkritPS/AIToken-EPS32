@@ -78,6 +78,11 @@ String codexPlanType = "";
 String lastCcPlanType = "";
 String lastCodexPlanType = "";
 
+// แหล่งข้อมูล Claude Code/Codex ของ bridge ที่จอนี้เชื่อมอยู่: "local" (ยิง API เอง)
+// หรือ "mirror" (อ่านจากเครื่องหลักผ่าน peerBridgeUrl สำเร็จ) แสดงเป็น badge หน้าไอคอน Wi-Fi
+String dataSource = "local";
+String lastDataSource = "";
+
 // ข้อมูล Spark Local AI (Ollama model + % CPU + RAM + Tokens)
 bool sparkConnected = false;
 String sparkModel = "Local AI";
@@ -225,6 +230,7 @@ void fetchAndDisplayQuota() {
 
       ccPlanType = doc["ccPlanType"] | "";
       codexPlanType = doc["codexPlanType"] | "";
+      dataSource = doc["dataSource"] | "local";
 
       if (isFirstDraw) {
         // ครั้งแรก: วาดหน้าจอทั้งหมด รวมถึงพื้นแผงและกรอบ
@@ -536,6 +542,17 @@ void drawPanelHeader(int g) {
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_DARKGREY, bg);
     tft.drawString("10.104.1.23", 310, textY);
+  } else if (g == 0) {
+    // แหล่งข้อมูล Claude Code/Codex ของ bridge: -M (Mirror จากเครื่องหลัก) / -L (Local ยิงเอง)
+    // วางไว้หน้าไอคอน Wi-Fi (x=290) ตามที่ขอ
+    tft.setTextDatum(TR_DATUM);
+    if (dataSource == "mirror") {
+      tft.setTextColor(TFT_CYAN, bg);
+      tft.drawString("-M", 286, textY);
+    } else {
+      tft.setTextColor(TFT_DARKGREY, bg);
+      tft.drawString("-L", 286, textY);
+    }
   }
 
   // เส้นแบ่งใต้ Header ทุกแผง (เหมือน AIToken-eInk)
@@ -546,6 +563,7 @@ void drawPanelHeader(int g) {
     lastPanelRateLimited[rlIdx] = panelRateLimited[rlIdx];
     lastPanelRateLimitReset[rlIdx] = panelRateLimitReset[rlIdx];
   }
+  if (g == 0) lastDataSource = dataSource;
   if (g == 1) lastCcPlanType = ccPlanType;
   if (g == 2) lastCodexPlanType = codexPlanType;
   if (g == 3) {
@@ -779,7 +797,8 @@ void updateDashboardValues() {
                                           sparkTotalTokens != lastSparkTotalTokens));
     bool planChanged = (g == 1 && ccPlanType != lastCcPlanType) ||
                        (g == 2 && codexPlanType != lastCodexPlanType);
-    if (panelLastUpdated[g] != lastPanelLastUpdated[g] || rlChanged || sparkHeaderChanged || planChanged) {
+    bool dataSourceChanged = (g == 0 && dataSource != lastDataSource);
+    if (panelLastUpdated[g] != lastPanelLastUpdated[g] || rlChanged || sparkHeaderChanged || planChanged || dataSourceChanged) {
       drawPanelHeader(g);
     }
   }

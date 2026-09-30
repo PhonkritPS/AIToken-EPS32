@@ -803,7 +803,10 @@ function buildDynamicResponse() {
     sparkSavedThb: quotaStore.sparkSavedThb || '฿0',
     sparkSpeed: quotaStore.sparkSpeed || '',
     sparkLastUpdated: quotaStore.sparkLastUpdated || '',
-    lastUpdated: quotaStore.lastUpdated
+    lastUpdated: quotaStore.lastUpdated,
+    // "mirror" = กำลังอ่าน cc*/codex* จากเครื่องหลักผ่าน peerBridgeUrl สำเร็จอยู่
+    // "local"  = เครื่องนี้ยิง API เอง (ไม่ได้ตั้ง peerBridgeUrl ไว้ หรือตั้งไว้แต่เอื้อมไม่ถึงเลย fallback มายิงเอง)
+    dataSource: (getPeerBridgeUrl() && peerReachableNow) ? 'mirror' : 'local'
   };
 
   // ถ้าเพิ่งอ่านค่าจากเครื่องหลัก (peerBridgeUrl) สำเร็จรอบล่าสุด ใช้ค่านั้นทับ cc*/codex*
