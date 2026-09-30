@@ -77,9 +77,17 @@ powershell -ExecutionPolicy Bypass -File install_autostart.ps1 -Uninstall   # re
 ```
 
 ### 7. Running the bridge on multiple machines with the same login?
-If more than one machine (e.g. office + home) runs the bridge while logged into the **same** Claude Code / Codex account, each one independently polls that account's usage API, multiplying the real request rate and risking a 429 rate limit. Mark exactly one machine as **PRIMARY** (fetches live usage) and the rest as **SECONDARY** (skips those API calls, serves cached values instead — Antigravity data is unaffected since it's local):
+If more than one machine (e.g. office + home) runs the bridge while logged into the **same** Claude Code / Codex account, each one independently polls that account's usage API, multiplying the real request rate and risking a 429 rate limit.
+
+**If the machines can reach each other (VPN/LAN):** point the secondary machine at the primary instead of polling itself — it automatically falls back to polling the real API on its own if the primary becomes unreachable. On the secondary machine, create `bridge.local.json`:
+```json
+{ "peerBridgeUrl": "http://<primary machine's IP>:5000/api/quota" }
+```
+Watch `bridge.log` for `[mirror]` (reading from the primary) vs `[fallback-self]` (primary unreachable, polling directly) next to the `CC xx%/xx%` status.
+
+**Otherwise:** manually mark exactly one machine as **PRIMARY** (fetches live usage) and the rest as **SECONDARY** (skips those API calls, serves cached values instead):
 ```powershell
 bridge_primary_on.bat    # this machine: PRIMARY (fetch live usage)
 bridge_primary_off.bat   # this machine: SECONDARY (skip usage API calls)
 ```
-Takes effect within ~10s, no restart needed. See [SETUP.md](SETUP.md) for details.
+Either way takes effect within ~10s, no restart needed, and Antigravity data (Gemini/Claude) is unaffected since it's always read from the local IDE. See [SETUP.md](SETUP.md) for details.

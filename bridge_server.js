@@ -8,23 +8,74 @@ const PORT = 5000;
 const CACHE_FILE = path.join(__dirname, 'last_quota.json');
 
 // =========================================================================
-// Primary / Secondary switch (ป้องกันหลายเครื่องที่ login บัญชีเดียวกันยิง API
+// Primary / Secondary + Peer Mirror (ป้องกันหลายเครื่องที่ login บัญชีเดียวกันยิง API
 // เช็คโควต้า Claude Code / Codex พร้อมกัน จนโดน Rate Limit ง่ายขึ้น)
-// อ่านไฟล์ bridge.local.json ที่ __dirname (ไม่ commit ขึ้น git เพราะต้องตั้งต่างกันในแต่ละเครื่อง)
-//   { "fetchExternalUsage": false }   -> เครื่องนี้เป็น Secondary ข้ามการยิง API จริง ใช้ค่าที่มีอยู่แทน
-// ไม่มีไฟล์ = ถือว่าเป็น Primary (พฤติกรรมเดิม เผื่อมีแค่เครื่องเดียว) อ่านใหม่ทุกครั้งจึงสลับได้
-// โดยไม่ต้อง restart bridge (มีผลภายในรอบโพลถัดไป)
-// ใช้ bridge_primary_on.bat / bridge_primary_off.bat สลับได้ง่ายๆ
+// อ่านไฟล์ bridge.local.json ที่ __dirname (ไม่ commit ขึ้น git เพราะต้องตั้งต่างกันในแต่ละเครื่อง):
+//   { "fetchExternalUsage": false }        -> Secondary แบบ manual ข้ามการยิง API เสมอ ใช้ bridge_primary_on/off.bat
+//   { "peerBridgeUrl": "http://IP:5000/api/quota" }
+//       -> ก่อนยิง API จริงเอง ลองอ่านค่าจากเครื่องนี้ผ่าน VPN/LAN ก่อน
+//          ถ้าอ่านได้ -> ใช้ค่า cc*/codex* จากเครื่องนั้นแทน (ไม่ยิง API เอง)
+//          ถ้าอ่านไม่ได้ (ปิดเครื่อง/VPN หลุด) -> fallback มายิง API เองอัตโนมัติ
+//       ตั้งเฉพาะเครื่อง "รอง" (เช่นคอมที่บ้าน) ชี้ไปคอม "หลัก" (เช่นคอมที่ทำงาน)
+//       เครื่องหลักไม่ต้องตั้งอะไรเลย ยิง API ของตัวเองตามปกติเสมอ ไม่ต้องรู้จักเครื่องรอง
+// อ่านไฟล์ใหม่ทุกครั้งจึงสลับ/แก้ได้โดยไม่ต้อง restart bridge (มีผลภายในรอบโพลถัดไป)
 // =========================================================================
 const LOCAL_CONFIG_FILE = path.join(__dirname, 'bridge.local.json');
+const PEER_TIMEOUT_MS = 3000;
+
+function readLocalConfig() {
+  try {
+    if (!fs.existsSync(LOCAL_CONFIG_FILE)) return {};
+    return JSON.parse(fs.readFileSync(LOCAL_CONFIG_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
 
 function isPrimaryForExternalUsage() {
+  return readLocalConfig().fetchExternalUsage !== false; // ต้องเขียน false ชัดเจนเท่านั้นถึงจะปิด
+}
+
+function getPeerBridgeUrl() {
+  const url = readLocalConfig().peerBridgeUrl;
+  return (typeof url === 'string' && url.trim()) ? url.trim() : null;
+}
+
+// ฟิลด์ cc*/codex* ที่มาจากการยิง API จริง (rate-limited) เท่านั้นที่ mirror จาก peer ได้
+// ไม่รวม token count (ccWindowTokens ฯลฯ) เพราะนับจาก log ในเครื่องนั้นๆ เป็นข้อมูลเฉพาะเครื่อง ไม่ใช่ของบัญชีรวม
+const PEER_MIRROR_FIELDS = [
+  'ccWeekly', 'cc5Hr', 'ccWeeklySubtext', 'cc5HrSubtext', 'ccWeeklyReset', 'cc5HrReset',
+  'ccRateLimited', 'ccRateLimitReset', 'ccLastUpdated', 'ccPlanType',
+  'codexConnected', 'codexPlanType', 'codexPrimaryPercent', 'codexPrimaryReset',
+  'codexSecondaryPercent', 'codexSecondaryReset', 'codexRateLimited', 'codexRateLimitReset', 'codexLastUpdated'
+];
+
+let peerMirrorData = null; // ค่าล่าสุดที่อ่านได้จาก peer สำเร็จ (null = ยังไม่เคยสำเร็จ/ปิดฟีเจอร์นี้)
+let peerReachableNow = false;
+
+async function tryMirrorFromPeer() {
+  const peerUrl = getPeerBridgeUrl();
+  if (!peerUrl) {
+    peerReachableNow = false;
+    return false;
+  }
+
   try {
-    if (!fs.existsSync(LOCAL_CONFIG_FILE)) return true;
-    const cfg = JSON.parse(fs.readFileSync(LOCAL_CONFIG_FILE, 'utf8'));
-    return cfg.fetchExternalUsage !== false; // ต้องเขียน false ชัดเจนเท่านั้นถึงจะปิด
+    const res = await fetch(peerUrl, { signal: AbortSignal.timeout(PEER_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const mirrored = {};
+    for (const key of PEER_MIRROR_FIELDS) {
+      if (data[key] !== undefined) mirrored[key] = data[key];
+    }
+    peerMirrorData = mirrored;
+    peerReachableNow = true;
+    return true;
   } catch (e) {
-    return true; // อ่านไฟล์ไม่ได้ -> ไม่เปลี่ยนพฤติกรรมเดิม ยิงตามปกติ
+    // เครื่องหลักปิดอยู่ / VPN หลุด / เน็ตช้าเกิน timeout -> ไม่เจอ ให้ fallback ไปยิง API เอง
+    peerReachableNow = false;
+    return false;
   }
 }
 
@@ -699,7 +750,7 @@ function buildDynamicResponse() {
     codexRateLimitReset = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   }
 
-  return {
+  const result = {
     connected: quotaStore.connected || quotaStore.lastUpdated !== null,
     ideRunning: quotaStore.ideRunning,
     geminiWeekly: geminiWeeklyVal,
@@ -754,6 +805,14 @@ function buildDynamicResponse() {
     sparkLastUpdated: quotaStore.sparkLastUpdated || '',
     lastUpdated: quotaStore.lastUpdated
   };
+
+  // ถ้าเพิ่งอ่านค่าจากเครื่องหลัก (peerBridgeUrl) สำเร็จรอบล่าสุด ใช้ค่านั้นทับ cc*/codex*
+  // แทนค่าที่คำนวณเองในเครื่องนี้ (ซึ่งจะเก่า/ค้าง เพราะเครื่องนี้ไม่ได้ยิง API เอง)
+  if (peerReachableNow && peerMirrorData) {
+    Object.assign(result, peerMirrorData);
+  }
+
+  return result;
 }
 
 // Background Poller ตรวจสอบสถานะทุกๆ 10 วินาที
@@ -765,8 +824,13 @@ async function pollLoop() {
     quotaStore.ideRunning = false;
   }
 
-  await fetchClaudeCodeUsage();
-  await fetchCodexUsage();
+  // ลองอ่านจากเครื่องหลักผ่าน peerBridgeUrl ก่อน (ถ้าตั้งไว้) เจอแล้วข้ามการยิง API เอง
+  // ไม่เจอ (ปิดเครื่อง/VPN หลุด) หรือไม่ได้ตั้ง peerBridgeUrl ไว้ -> fallback ไปยิงเองตามปกติ
+  const mirrored = await tryMirrorFromPeer();
+  if (!mirrored) {
+    await fetchClaudeCodeUsage();
+    await fetchCodexUsage();
+  }
   await fetchSparkStatus();
   try {
     scanClaudeCodeTokens();
@@ -775,7 +839,8 @@ async function pollLoop() {
   const current = buildDynamicResponse();
   const time = new Date().toLocaleTimeString();
   const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
-  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}% | Tok ${current.ccWindowTokens}${ctxStr}`;
+  const mirrorTag = getPeerBridgeUrl() ? (mirrored ? ' [mirror]' : ' [fallback-self]') : '';
+  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}%${mirrorTag} | Tok ${current.ccWindowTokens}${ctxStr}`;
   const codexInfo = current.codexConnected
     ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
     : '';
@@ -836,8 +901,13 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 For ESP32 on Wi-Fi: http://${ip.split(' ')[0]}:${PORT}/api/quota  [${ip.split(' ')[1] || ''}]`);
   });
   console.log(`⏱️  Auto Real-time Countdown: Enabled even when IDE is closed!`);
-  console.log(isPrimaryForExternalUsage()
-    ? `🟢 Role: PRIMARY — fetching Claude Code / Codex usage from the real API`
-    : `🟡 Role: SECONDARY — skipping Claude Code / Codex API calls (see bridge.local.json)`);
+  const peerUrl = getPeerBridgeUrl();
+  if (!isPrimaryForExternalUsage()) {
+    console.log(`🟡 Role: SECONDARY — skipping Claude Code / Codex API calls (see bridge.local.json)`);
+  } else if (peerUrl) {
+    console.log(`🔗 Role: MIRROR — try reading cc*/codex* from ${peerUrl} first, fallback to real API if unreachable`);
+  } else {
+    console.log(`🟢 Role: PRIMARY — fetching Claude Code / Codex usage from the real API`);
+  }
   console.log(`=======================================================`);
 });
