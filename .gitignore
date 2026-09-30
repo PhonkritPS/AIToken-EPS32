@@ -16,3 +16,7 @@ build/
 
 # Bridge server log (autostart)
 bridge.log
+
+# ตั้งค่าเฉพาะเครื่อง: เครื่องไหนเป็น Primary (ยิง API เช็คโควต้า Claude Code/Codex จริง)
+# ไม่ commit เพราะแต่ละเครื่อง (ที่ทำงาน/ที่บ้าน) ต้องตั้งไม่เหมือนกัน
+bridge.local.json

@@ -7,6 +7,27 @@ const { execSync, exec } = require('child_process');
 const PORT = 5000;
 const CACHE_FILE = path.join(__dirname, 'last_quota.json');
 
+// =========================================================================
+// Primary / Secondary switch (ป้องกันหลายเครื่องที่ login บัญชีเดียวกันยิง API
+// เช็คโควต้า Claude Code / Codex พร้อมกัน จนโดน Rate Limit ง่ายขึ้น)
+// อ่านไฟล์ bridge.local.json ที่ __dirname (ไม่ commit ขึ้น git เพราะต้องตั้งต่างกันในแต่ละเครื่อง)
+//   { "fetchExternalUsage": false }   -> เครื่องนี้เป็น Secondary ข้ามการยิง API จริง ใช้ค่าที่มีอยู่แทน
+// ไม่มีไฟล์ = ถือว่าเป็น Primary (พฤติกรรมเดิม เผื่อมีแค่เครื่องเดียว) อ่านใหม่ทุกครั้งจึงสลับได้
+// โดยไม่ต้อง restart bridge (มีผลภายในรอบโพลถัดไป)
+// ใช้ bridge_primary_on.bat / bridge_primary_off.bat สลับได้ง่ายๆ
+// =========================================================================
+const LOCAL_CONFIG_FILE = path.join(__dirname, 'bridge.local.json');
+
+function isPrimaryForExternalUsage() {
+  try {
+    if (!fs.existsSync(LOCAL_CONFIG_FILE)) return true;
+    const cfg = JSON.parse(fs.readFileSync(LOCAL_CONFIG_FILE, 'utf8'));
+    return cfg.fetchExternalUsage !== false; // ต้องเขียน false ชัดเจนเท่านั้นถึงจะปิด
+  } catch (e) {
+    return true; // อ่านไฟล์ไม่ได้ -> ไม่เปลี่ยนพฤติกรรมเดิม ยิงตามปกติ
+  }
+}
+
 // Spark Local AI (10.104.1.23)
 const SPARK_HOST = '10.104.1.23';
 const SPARK_SSH_USER = 'admin';
@@ -205,6 +226,7 @@ let lastCcUsageFetch = 0;
 let ccRetryUntil = 0;
 
 async function fetchClaudeCodeUsage() {
+  if (!isPrimaryForExternalUsage()) return; // เครื่อง Secondary: ไม่ยิง API ซ้ำกับเครื่องอื่น
   const now = Date.now();
   if (now < ccRetryUntil) return;
   if (now - lastCcUsageFetch < CLAUDE_USAGE_INTERVAL) return;
@@ -262,6 +284,7 @@ let lastCodexUsageFetch = 0;
 let codexRetryUntil = 0;
 
 async function fetchCodexUsage() {
+  if (!isPrimaryForExternalUsage()) return; // เครื่อง Secondary: ไม่ยิง API ซ้ำกับเครื่องอื่น
   const now = Date.now();
   if (now < codexRetryUntil) return;
   if (now - lastCodexUsageFetch < CODEX_USAGE_INTERVAL) return;
@@ -813,5 +836,8 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 For ESP32 on Wi-Fi: http://${ip.split(' ')[0]}:${PORT}/api/quota  [${ip.split(' ')[1] || ''}]`);
   });
   console.log(`⏱️  Auto Real-time Countdown: Enabled even when IDE is closed!`);
+  console.log(isPrimaryForExternalUsage()
+    ? `🟢 Role: PRIMARY — fetching Claude Code / Codex usage from the real API`
+    : `🟡 Role: SECONDARY — skipping Claude Code / Codex API calls (see bridge.local.json)`);
   console.log(`=======================================================`);
 });

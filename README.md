@@ -75,3 +75,11 @@ Register a Windows scheduled task that runs the bridge hidden at every logon (re
 powershell -ExecutionPolicy Bypass -File install_autostart.ps1              # install
 powershell -ExecutionPolicy Bypass -File install_autostart.ps1 -Uninstall   # remove
 ```
+
+### 7. Running the bridge on multiple machines with the same login?
+If more than one machine (e.g. office + home) runs the bridge while logged into the **same** Claude Code / Codex account, each one independently polls that account's usage API, multiplying the real request rate and risking a 429 rate limit. Mark exactly one machine as **PRIMARY** (fetches live usage) and the rest as **SECONDARY** (skips those API calls, serves cached values instead — Antigravity data is unaffected since it's local):
+```powershell
+bridge_primary_on.bat    # this machine: PRIMARY (fetch live usage)
+bridge_primary_off.bat   # this machine: SECONDARY (skip usage API calls)
+```
+Takes effect within ~10s, no restart needed. See [SETUP.md](SETUP.md) for details.
