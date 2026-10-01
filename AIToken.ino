@@ -496,7 +496,7 @@ void drawPanelHeader(int g) {
     String plan = codexPlanType;
     plan.toUpperCase();
     String badge = "[" + plan + "]";
-    uint16_t badgeCol = (plan == "PRO" || plan == "PLUS") ? TFT_GREEN : 0x56F7; // เขียวถ้า Plus/Pro, มินต์ถ้า Free
+    uint16_t badgeCol = (plan == "PRO" || plan == "PLUS" || plan == "PROLITE") ? TFT_GREEN : 0x56F7; // เขียวถ้า Plus/Pro, มินต์ถ้า Free
     tft.setTextColor(badgeCol, bg);
     tft.drawString(badge, curX + 4, textY);
     curX += tft.textWidth(badge) + 4;

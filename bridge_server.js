@@ -103,7 +103,7 @@ const CODEX_USAGE_INTERVAL = 120000; // ดึง % โควต้าจาก 
 // 🧪 จำลองหน้าต่างที่สอง (secondary_window) ของ Codex ไว้ดูตัวอย่างก่อนอัปเกรดแพลนจริง
 // ใช้เฉพาะตอนแพลนปัจจุบันยังไม่มี secondary_window (เช่น Free) — พอไหนได้ค่าจริงจาก API
 // (หลังอัปเกรดเป็น Plus/Pro) จะใช้ค่าจริงแทนทันทีโดยไม่ต้องแก้อะไร ปิดจำลองได้ด้วยการตั้งเป็น false
-const CODEX_SIMULATE_SECONDARY = true;
+const CODEX_SIMULATE_SECONDARY = false;
 
 // โครงสร้างข้อมูลหลัก พร้อมเก็บ resetTime (ISO string) เพื่อใช้นับถอยหลังจริงแม้ปิด IDE
 let quotaStore = {
@@ -369,17 +369,29 @@ async function fetchCodexUsage() {
     quotaStore.codexConnected = true;
     quotaStore.codexPlanType = data.plan_type || null;
 
+    // response รุ่นใหม่ (เช่น plan "prolite"): primary_window เป็นหน้าต่างรายสัปดาห์ (limit_window_seconds=604800),
+    // secondary_window เป็น null, และมี chatpass.windows[] เป็นข้อมูลสำรอง -> ใช้เป็น fallback ถ้า rate_limit ว่าง
     const rl = data.rate_limit || {};
-    if (rl.primary_window) {
-      quotaStore.codexPrimaryPercent = Math.max(0, Math.round(100 - (rl.primary_window.used_percent ?? 0)));
-      quotaStore.codexPrimaryResetTime = rl.primary_window.reset_at ? new Date(rl.primary_window.reset_at * 1000).toISOString() : null;
+    const primaryWin = rl.primary_window || data.chatpass?.windows?.[0] || null;
+    const secondaryWin = rl.secondary_window || null;
+    const usedToLeft = (w) => (rl.limit_reached && w === rl.primary_window)
+      ? 0 // ชนลิมิตแล้ว -> แสดง 0% แน่นอน แม้ used_percent จะยังไม่ถึง 100
+      : Math.max(0, Math.min(100, Math.round(100 - (w.used_percent ?? 0))));
+    const resetOf = (w) => {
+      if (w.reset_at) return new Date(w.reset_at * 1000).toISOString();
+      if (w.reset_after_seconds != null) return new Date(Date.now() + w.reset_after_seconds * 1000).toISOString();
+      return null;
+    };
+    if (primaryWin) {
+      quotaStore.codexPrimaryPercent = usedToLeft(primaryWin);
+      quotaStore.codexPrimaryResetTime = resetOf(primaryWin);
     } else {
       quotaStore.codexPrimaryPercent = null;
       quotaStore.codexPrimaryResetTime = null;
     }
-    if (rl.secondary_window) {
-      quotaStore.codexSecondaryPercent = Math.max(0, Math.round(100 - (rl.secondary_window.used_percent ?? 0)));
-      quotaStore.codexSecondaryResetTime = rl.secondary_window.reset_at ? new Date(rl.secondary_window.reset_at * 1000).toISOString() : null;
+    if (secondaryWin) {
+      quotaStore.codexSecondaryPercent = usedToLeft(secondaryWin);
+      quotaStore.codexSecondaryResetTime = resetOf(secondaryWin);
     } else if (CODEX_SIMULATE_SECONDARY) {
       // ข้อมูลจำลอง (ไม่ใช่ของจริง) — เห็นตัวอย่างว่าถ้ามี secondary window (แบบ Plus/Pro) จอจะแสดงยังไง
       quotaStore.codexSecondaryPercent = 58;
@@ -783,9 +795,9 @@ function buildDynamicResponse() {
     codexPlanType: quotaStore.codexPlanType,
     // -1 = ไม่มีข้อมูล (แพลนนี้ไม่มีหน้าต่างนี้ หรือยังไม่เคยดึงสำเร็จ) จอควรข้ามไม่วาดช่องนี้
     codexPrimaryPercent: (codexPrimaryVal === null || codexPrimaryVal === undefined) ? -1 : codexPrimaryVal,
-    codexPrimaryReset: (codexPrimaryVal !== null && codexPrimaryVal !== undefined && codexPrimaryVal < 100) ? codexP.short : "",
+    codexPrimaryReset: quotaStore.codexPrimaryResetTime ? codexP.short : "",
     codexSecondaryPercent: (codexSecondaryVal === null || codexSecondaryVal === undefined) ? -1 : codexSecondaryVal,
-    codexSecondaryReset: (codexSecondaryVal !== null && codexSecondaryVal !== undefined && codexSecondaryVal < 100) ? codexS.short : "",
+    codexSecondaryReset: quotaStore.codexSecondaryResetTime ? codexS.short : "",
     codexRateLimited: codexRateLimitedNow,
     codexRateLimitReset: codexRateLimitReset,
     codexLastUpdated: quotaStore.codexLastUpdated,
