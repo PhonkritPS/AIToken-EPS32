@@ -441,14 +441,18 @@ function formatOllamaModel(raw) {
 
 async function fetchSparkStatus() {
   const now = Date.now();
+  // Watchdog: ปลด lock อัตโนมัติหากมีคำสั่งก่อนหน้าค้างเกิน 15 วินาที
+  if (isSparkPolling && (now - lastSparkPoll > 15000)) {
+    isSparkPolling = false;
+  }
   if (now - lastSparkPoll < SPARK_USAGE_INTERVAL) return;
   if (isSparkPolling) return;
   lastSparkPoll = now;
   isSparkPolling = true;
 
   try {
-    // 1. ตรวจสอบ Ollama / Local AI บน Port 8188 เป็นหลัก (fallback 11434)
-    const candidatePorts = [8188, 11434];
+    // 1. ตรวจสอบ Ollama / Local AI บน Port 11434 เป็นหลัก (fallback 8188)
+    const candidatePorts = [11434, 8188];
     let detectedModel = null;
     let modelStatus = 'Ready';
     let localAiOk = false;
@@ -488,9 +492,9 @@ async function fetchSparkStatus() {
       }
     }
 
-    // 2. ดึง % CPU และ RAM ผ่าน SSH (non-blocking)
-    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; echo ===FREE===; free -m; echo ===TOKENS===; python3 /home/admin/spark_tokens.py 2>/dev/null || echo 0,0,0,0"`;
-    exec(sshCmd, (err, stdout) => {
+    // 2. ดึง % CPU และ RAM ผ่าน SSH (non-blocking พร้อม timeout และ keepalive ป้องกันค้าง)
+    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; echo ===FREE===; free -m; echo ===TOKENS===; python3 /home/admin/spark_tokens.py 2>/dev/null || echo 0,0,0,0"`;
+    exec(sshCmd, { timeout: 5000 }, (err, stdout) => {
       isSparkPolling = false;
       if (err) {
         quotaStore.sparkConnected = localAiOk;
