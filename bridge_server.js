@@ -146,6 +146,11 @@ let quotaStore = {
   sparkSavedCost: '$0',
   sparkSavedThb: '฿0',
   sparkSpeed: '',
+  sparkContainers: [],
+  sparkC1Name: '',
+  sparkC1Cpu: '',
+  sparkC2Name: '',
+  sparkC2Cpu: '',
   sparkLastUpdated: null,
   lastUpdated: null
 };
@@ -493,13 +498,22 @@ async function fetchSparkStatus() {
     }
 
     // 2. ดึง % CPU และ RAM ผ่าน SSH (non-blocking พร้อม timeout และ keepalive ป้องกันค้าง)
-    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; echo ===FREE===; free -m; echo ===TOKENS===; python3 /home/admin/spark_tokens.py 2>/dev/null || echo 0,0,0,0"`;
-    exec(sshCmd, { timeout: 5000 }, (err, stdout) => {
+    const sshCmd = `ssh -o BatchMode=yes -o ConnectTimeout=3 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 ${SPARK_SSH_USER}@${SPARK_HOST} "top -bn1 | head -n 5; echo ===FREE===; free -m; echo ===TOKENS===; python3 /home/admin/spark_tokens.py 2>/dev/null || echo 0,0,0,0; echo ===DOCKER===; docker stats --no-stream --format '{{.Name}}:{{.CPUPerc}}' 2>/dev/null || true"`;
+    exec(sshCmd, { timeout: 10000 }, (err, stdout) => {
       isSparkPolling = false;
       if (err) {
         quotaStore.sparkConnected = localAiOk;
         quotaStore.sparkStatus = localAiOk ? modelStatus : 'Offline';
+        quotaStore.sparkContainers = [];
         if (localAiOk) quotaStore.sparkLastUpdated = new Date().toLocaleTimeString('th-TH');
+      // Save cache on spark update (success)
+      try {
+        fs.writeFileSync(CACHE_FILE, JSON.stringify(quotaStore, null, 2));
+      } catch (e) {}
+      // Save cache on spark update
+      try {
+        fs.writeFileSync(CACHE_FILE, JSON.stringify(quotaStore, null, 2));
+      } catch (e) {}
         return;
       }
 
@@ -536,6 +550,44 @@ async function fetchSparkStatus() {
         quotaStore.sparkSavedThb = savedThb > 0 ? `฿${formatTokens(savedThb)}` : '฿0';
         const speedVal = parseFloat(parts[4]) || 0;
         quotaStore.sparkSpeed = speedVal > 0 ? `${Math.round(speedVal)} t/s` : '';
+      }
+
+      
+      // ดึงข้อมูล Docker Container CPU จาก docker stats
+      const mDocker = stdout.match(/===DOCKER===\s*([\s\S]*)$/);
+      if (mDocker && mDocker[1]) {
+        const lines = mDocker[1].trim().split(/\r?\n/);
+        const containers = [];
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('===')) continue;
+          const colonIdx = trimmed.indexOf(':');
+          if (colonIdx > 0) {
+            const name = trimmed.substring(0, colonIdx).trim();
+            let cpu = trimmed.substring(colonIdx + 1).trim();
+            if (cpu && !cpu.endsWith('%')) cpu += '%';
+            containers.push({
+              name,
+              cpu: cpu || '0.00%',
+              running: true
+            });
+          }
+        }
+        quotaStore.sparkContainers = containers;
+        if (containers.length > 0) {
+          quotaStore.sparkC1Name = containers[0].name;
+          quotaStore.sparkC1Cpu = containers[0].cpu;
+        } else {
+          quotaStore.sparkC1Name = '';
+          quotaStore.sparkC1Cpu = '';
+        }
+        if (containers.length > 1) {
+          quotaStore.sparkC2Name = containers[1].name;
+          quotaStore.sparkC2Cpu = containers[1].cpu;
+        } else {
+          quotaStore.sparkC2Name = '';
+          quotaStore.sparkC2Cpu = '';
+        }
       }
 
       quotaStore.sparkModel = detectedModel || quotaStore.sparkModel || 'Local AI';
@@ -818,6 +870,11 @@ function buildDynamicResponse() {
     sparkSavedCost: quotaStore.sparkSavedCost || '$0',
     sparkSavedThb: quotaStore.sparkSavedThb || '฿0',
     sparkSpeed: quotaStore.sparkSpeed || '',
+    sparkContainers: quotaStore.sparkContainers || [],
+    sparkC1Name: quotaStore.sparkC1Name || '',
+    sparkC1Cpu: quotaStore.sparkC1Cpu || '',
+    sparkC2Name: quotaStore.sparkC2Name || '',
+    sparkC2Cpu: quotaStore.sparkC2Cpu || '',
     sparkLastUpdated: quotaStore.sparkLastUpdated || '',
     lastUpdated: quotaStore.lastUpdated,
     // "mirror" = กำลังอ่าน cc*/codex* จากเครื่องหลักผ่าน peerBridgeUrl สำเร็จอยู่
