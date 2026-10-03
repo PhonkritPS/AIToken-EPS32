@@ -20,9 +20,9 @@ bool isFirstDraw = true;
 bool lastWiFiConnected = false;
 
 // =========================================================================
-// Layout 320x240: จัดเรียงเหมือน D:\GitHub\AIToken-eInk ทั้งหมด
-// แผง 0: CLAUDE CODE (กรอบบนสุด)
-// แผง 1: ANTIGRAVITY (Gemini & Claude/GPT)
+// Layout 320x240:
+// แผง 0: ANTIGRAVITY (Gemini & Claude/GPT) (กรอบบนสุด)
+// แผง 1: CLAUDE CODE (Plan Limits + Tokens Day / 5H)
 // แผง 2: OPENAI CODEX (Weekly Limit & Plan)
 // แผง 3: SPARK LOCAL (Host Telemetry, Docker Containers, Tokens & Savings)
 // =========================================================================
@@ -31,30 +31,30 @@ const int HEADER_H[PANELS] = { 14, 14, 14, 14 };
 const int PANEL_Y[PANELS]  = { 1, 54, 107, 144 };
 const int PANEL_H[PANELS]  = { 50, 50, 34, 94 };
 
-const uint16_t PANEL_BG[PANELS]        = { 0x28A1, 0x08C5, 0x0903, 0x0182 }; // น้ำตาลอมส้ม (Claude) / กรมท่า (Antigravity) / เขียวอมฟ้าเข้ม (Codex) / เขียวเข้ม Cyber (Spark)
-const uint16_t PANEL_BORDER[PANELS]    = { 0x6A06, 0x4B0D, 0x3CB1, 0x2D86 };
-const uint16_t PANEL_TAG_COLOR[PANELS] = { 0xDBAA, 0x443E, 0x56F7, 0x7FE0 }; // ส้ม / ฟ้า / มินต์ / เขียวมะนาว NVIDIA
-const char* PANEL_TAG[PANELS]          = { "CLAUDE CODE", "ANTIGRAVITY", "OPENAI CODEX", "SPARK LOCAL" };
+const uint16_t PANEL_BG[PANELS]        = { 0x08C5, 0x28A1, 0x0903, 0x0182 }; // กรมท่า (Antigravity) / น้ำตาลอมส้ม (Claude) / เขียวอมฟ้าเข้ม (Codex) / เขียวเข้ม Cyber (Spark)
+const uint16_t PANEL_BORDER[PANELS]    = { 0x4B0D, 0x6A06, 0x3CB1, 0x2D86 };
+const uint16_t PANEL_TAG_COLOR[PANELS] = { 0x443E, 0xDBAA, 0x56F7, 0x7FE0 }; // ฟ้า / ส้ม / มินต์ / เขียวมะนาว NVIDIA
+const char* PANEL_TAG[PANELS]          = { "ANTIGRAVITY", "CLAUDE CODE", "OPENAI CODEX", "SPARK LOCAL" };
 
 const int LABEL_X = 8;
 
 // -------------------------------------------------------------------------
-// 1. ข้อมูล Claude Code (แผง 0)
-// -------------------------------------------------------------------------
-int ccWeekly = 100, cc5Hr = 100;
-String ccWeeklyReset = "", cc5HrReset = "";
-String tokenToday = "-", tokenTodayCache = "0";
-String tokenWindow = "-", tokenWindowCache = "0";
-String ccPlanType = "";
-
-// -------------------------------------------------------------------------
-// 2. ข้อมูล Antigravity IDE (แผง 1)
+// 1. ข้อมูล Antigravity IDE (แผง 0)
 // -------------------------------------------------------------------------
 bool ideRunning = true;
 int geminiWeekly = 100, gemini5Hr = 100;
 String geminiWeeklyReset = "", gemini5HrReset = "";
 int claudeWeekly = 100, claude5Hr = 100;
 String claudeWeeklyReset = "", claude5HrReset = "";
+
+// -------------------------------------------------------------------------
+// 2. ข้อมูล Claude Code (แผง 1)
+// -------------------------------------------------------------------------
+int ccWeekly = 100, cc5Hr = 100;
+String ccWeeklyReset = "", cc5HrReset = "";
+String tokenToday = "-", tokenTodayCache = "0";
+String tokenWindow = "-", tokenWindowCache = "0";
+String ccPlanType = "";
 
 // -------------------------------------------------------------------------
 // 3. ข้อมูล OpenAI Codex (แผง 2)
@@ -95,8 +95,8 @@ String sparkSavedThb = "฿0";
 // ข้อมูล Header รวม
 // -------------------------------------------------------------------------
 String panelLastUpdated[PANELS] = { "", "", "", "" };
-bool panelRateLimited[2] = { false, false };       // [0]=Claude Code(แผง0), [1]=Codex(แผง2)
-String panelRateLimitReset[2] = { "", "" };
+bool panelRateLimited[PANELS] = { false, false, false, false };       // [1]=Claude Code(แผง1), [2]=Codex(แผง2)
+String panelRateLimitReset[PANELS] = { "", "", "", "" };
 String dataSource = "local";
 
 // ประกาศฟังก์ชันล่วงหน้า
@@ -106,8 +106,8 @@ void drawDashboardFull();
 void updateDashboardValues();
 void fetchAndDisplayQuota();
 void drawPanelHeader(int g);
-void drawClaudeCodeBody();
 void drawAntigravityBody();
+void drawClaudeCodeBody();
 void drawCodexBody();
 void drawSparkRowFull();
 uint16_t quotaColor(int percent);
@@ -200,21 +200,7 @@ void fetchAndDisplayQuota() {
         return s;
       };
 
-      // 1. Claude Code (แผง 0)
-      ccWeekly = doc["ccWeekly"] | 100;
-      cc5Hr = doc["cc5Hr"] | 100;
-      ccWeeklyReset = formatSubtext(doc["ccWeeklyReset"] | doc["ccWeeklySubtext"] | "");
-      cc5HrReset = formatSubtext(doc["cc5HrReset"] | doc["cc5HrSubtext"] | "");
-      tokenToday = doc["ccTodayTokens"] | "-";
-      tokenTodayCache = doc["ccTodayCache"] | "0";
-      tokenWindow = doc["ccWindowTokens"] | "-";
-      tokenWindowCache = doc["ccWindowCache"] | "0";
-      ccPlanType = doc["ccPlanType"] | "";
-      panelRateLimited[0] = doc["ccRateLimited"] | false;
-      panelRateLimitReset[0] = doc["ccRateLimitReset"] | "";
-      panelLastUpdated[0] = doc["ccLastUpdated"] | "";
-
-      // 2. Antigravity IDE (แผง 1)
+      // 1. Antigravity IDE (แผง 0)
       ideRunning = doc.containsKey("ideRunning") ? doc["ideRunning"].as<bool>() : true;
       geminiWeekly = doc["geminiWeekly"] | 100;
       gemini5Hr = doc["gemini5Hr"] | 100;
@@ -224,15 +210,29 @@ void fetchAndDisplayQuota() {
       claude5Hr = doc["claude5Hr"] | 100;
       claudeWeeklyReset = formatSubtext(doc["claudeWeeklyReset"] | doc["claudeWeeklySubtext"] | "");
       claude5HrReset = formatSubtext(doc["claude5HrReset"] | doc["claude5HrSubtext"] | "");
-      panelLastUpdated[1] = doc["lastUpdated"] | "";
+      panelLastUpdated[0] = doc["lastUpdated"] | "";
+
+      // 2. Claude Code (แผง 1)
+      ccWeekly = doc["ccWeekly"] | 100;
+      cc5Hr = doc["cc5Hr"] | 100;
+      ccWeeklyReset = formatSubtext(doc["ccWeeklyReset"] | doc["ccWeeklySubtext"] | "");
+      cc5HrReset = formatSubtext(doc["cc5HrReset"] | doc["cc5HrSubtext"] | "");
+      tokenToday = doc["ccTodayTokens"] | "-";
+      tokenTodayCache = doc["ccTodayCache"] | "0";
+      tokenWindow = doc["ccWindowTokens"] | "-";
+      tokenWindowCache = doc["ccWindowCache"] | "0";
+      ccPlanType = doc["ccPlanType"] | "";
+      panelRateLimited[1] = doc["ccRateLimited"] | false;
+      panelRateLimitReset[1] = doc["ccRateLimitReset"] | "";
+      panelLastUpdated[1] = doc["ccLastUpdated"] | "";
 
       // 3. OpenAI Codex (แผง 2)
       codexConnected = doc["codexConnected"] | false;
       codexPlanType = doc["codexPlanType"] | "";
       codexPrimaryPercent = doc["codexPrimaryPercent"] | -1;
       codexPrimaryReset = formatSubtext(doc["codexPrimaryReset"] | "");
-      panelRateLimited[1] = doc["codexRateLimited"] | false;
-      panelRateLimitReset[1] = doc["codexRateLimitReset"] | "";
+      panelRateLimited[2] = doc["codexRateLimited"] | false;
+      panelRateLimitReset[2] = doc["codexRateLimitReset"] | "";
       panelLastUpdated[2] = doc["codexLastUpdated"] | "";
 
       // 4. Spark Local AI (แผง 3)
@@ -412,17 +412,17 @@ void drawPanelHeader(int g) {
   int curX = LABEL_X + tft.textWidth(PANEL_TAG[g]);
 
   // 1.1 ป้าย Package / Plan Type / สถานะ [CLOSED]
-  if (g == 0 && ccPlanType.length() > 0) {
+  if (g == 0 && !ideRunning) {
+    tft.setTextColor(TFT_RED, bg);
+    tft.drawString("[CLOSED]", curX + 6, textY);
+    curX += tft.textWidth("[CLOSED]") + 6;
+  } else if (g == 1 && ccPlanType.length() > 0) {
     String plan = ccPlanType;
     plan.toUpperCase();
     String badge = "[" + plan + "]";
     tft.setTextColor(0xFFE0, bg); // สีทองสำหรับ Claude
     tft.drawString(badge, curX + 4, textY);
     curX += tft.textWidth(badge) + 4;
-  } else if (g == 1 && !ideRunning) {
-    tft.setTextColor(TFT_RED, bg);
-    tft.drawString("[CLOSED]", curX + 6, textY);
-    curX += tft.textWidth("[CLOSED]") + 6;
   } else if (g == 2 && codexPlanType.length() > 0) {
     String plan = codexPlanType;
     plan.toUpperCase();
@@ -440,13 +440,13 @@ void drawPanelHeader(int g) {
   }
 
   // 3. ป้ายเตือน Rate Limit หรือสถานะ Spark
-  if (g == 0 && panelRateLimited[0]) {
-    String msg = "RATE LIMIT " + panelRateLimitReset[0];
+  if (g == 1 && panelRateLimited[1]) {
+    String msg = "RATE LIMIT " + panelRateLimitReset[1];
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_RED, bg);
-    tft.drawString(msg, 286, textY);
-  } else if (g == 2 && panelRateLimited[1]) {
-    String msg = "RATE LIMIT " + panelRateLimitReset[1];
+    tft.drawString(msg, 310, textY);
+  } else if (g == 2 && panelRateLimited[2]) {
+    String msg = "RATE LIMIT " + panelRateLimitReset[2];
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_RED, bg);
     tft.drawString(msg, 310, textY);
@@ -493,65 +493,13 @@ void drawPanelHeader(int g) {
 }
 
 // =========================================================================
-// แผง 0: CLAUDE CODE (Plan Limits + Tokens Day / 5H)
+// แผง 0: ANTIGRAVITY (Gemini & Claude/GPT Mini Bars)
 // =========================================================================
-void drawClaudeCodeBody() {
-  int y0 = PANEL_Y[0] + HEADER_H[0] + 1;
+void drawAntigravityBody() {
+  int bodyTop = PANEL_Y[0] + HEADER_H[0] + 1;
   int bodyH = PANEL_H[0] - HEADER_H[0] - 2;
   uint16_t bg = PANEL_BG[0];
   uint16_t border = PANEL_BORDER[0];
-
-  tft.fillRect(2, y0, 316, bodyH, bg);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextSize(1);
-
-  // Row 1: Plan Limits (y = y0 + 3)
-  int r1Y = y0 + 3;
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString("Limit", LABEL_X, r1Y);
-
-  drawMiniBar(48, r1Y, 40, 8, ccWeekly, border, quotaColor(ccWeekly), bg);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(ccWeekly) + "%", 92, r1Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString(ccWeeklyReset, 120, r1Y);
-
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString("5H", 168, r1Y);
-  drawMiniBar(188, r1Y, 40, 8, cc5Hr, border, quotaColor(cc5Hr), bg);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(cc5Hr) + "%", 232, r1Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString(cc5HrReset, 260, r1Y);
-
-  // Row 2: Tokens (y = y0 + 19)
-  int r2Y = y0 + 19;
-  tft.setTextColor(0xDBAA, bg);
-  tft.drawString("Tokens", LABEL_X, r2Y);
-
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("Day:", 48, r2Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(tokenToday, 74, r2Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString("(c:" + tokenTodayCache + ")", 108, r2Y);
-
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("5H:", 168, r2Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(tokenWindow, 188, r2Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString("(c:" + tokenWindowCache + ")", 222, r2Y);
-}
-
-// =========================================================================
-// แผง 1: ANTIGRAVITY (Gemini & Claude/GPT Mini Bars)
-// =========================================================================
-void drawAntigravityBody() {
-  int bodyTop = PANEL_Y[1] + HEADER_H[1] + 1;
-  int bodyH = PANEL_H[1] - HEADER_H[1] - 2;
-  uint16_t bg = PANEL_BG[1];
-  uint16_t border = PANEL_BORDER[1];
 
   tft.fillRect(2, bodyTop, 316, bodyH, bg);
 
@@ -605,6 +553,58 @@ void drawAntigravityBody() {
   tft.drawString(String(claude5Hr) + "%", 232, r2Y);
   tft.setTextColor(TFT_DARKGREY, bg);
   tft.drawString(claude5HrReset, 260, r2Y);
+}
+
+// =========================================================================
+// แผง 1: CLAUDE CODE (Plan Limits + Tokens Day / 5H)
+// =========================================================================
+void drawClaudeCodeBody() {
+  int y0 = PANEL_Y[1] + HEADER_H[1] + 1;
+  int bodyH = PANEL_H[1] - HEADER_H[1] - 2;
+  uint16_t bg = PANEL_BG[1];
+  uint16_t border = PANEL_BORDER[1];
+
+  tft.fillRect(2, y0, 316, bodyH, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextSize(1);
+
+  // Row 1: Plan Limits (y = y0 + 3)
+  int r1Y = y0 + 3;
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString("Limit", LABEL_X, r1Y);
+
+  drawMiniBar(48, r1Y, 40, 8, ccWeekly, border, quotaColor(ccWeekly), bg);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(String(ccWeekly) + "%", 92, r1Y);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  tft.drawString(ccWeeklyReset, 120, r1Y);
+
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString("5H", 168, r1Y);
+  drawMiniBar(188, r1Y, 40, 8, cc5Hr, border, quotaColor(cc5Hr), bg);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(String(cc5Hr) + "%", 232, r1Y);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  tft.drawString(cc5HrReset, 260, r1Y);
+
+  // Row 2: Tokens (y = y0 + 19)
+  int r2Y = y0 + 19;
+  tft.setTextColor(0xDBAA, bg);
+  tft.drawString("Tokens", LABEL_X, r2Y);
+
+  tft.setTextColor(0xAD55, bg);
+  tft.drawString("Day:", 48, r2Y);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(tokenToday, 74, r2Y);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  tft.drawString("(c:" + tokenTodayCache + ")", 108, r2Y);
+
+  tft.setTextColor(0xAD55, bg);
+  tft.drawString("5H:", 168, r2Y);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(tokenWindow, 188, r2Y);
+  tft.setTextColor(TFT_DARKGREY, bg);
+  tft.drawString("(c:" + tokenWindowCache + ")", 222, r2Y);
 }
 
 // =========================================================================
@@ -791,8 +791,8 @@ void drawDashboardFull() {
   drawWiFiIcon(290, 1, isConnected, PANEL_BG[0]);
   lastWiFiConnected = isConnected;
 
-  drawClaudeCodeBody();
   drawAntigravityBody();
+  drawClaudeCodeBody();
   drawCodexBody();
   drawSparkRowFull();
 }
@@ -811,8 +811,8 @@ void updateDashboardValues() {
     drawPanelHeader(g);
   }
 
-  drawClaudeCodeBody();
   drawAntigravityBody();
+  drawClaudeCodeBody();
   drawCodexBody();
   drawSparkRowFull();
 }
