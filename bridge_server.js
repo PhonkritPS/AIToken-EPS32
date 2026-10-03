@@ -48,14 +48,25 @@ function getPeerBridgeUrl() {
   return (typeof url === 'string' && url.trim()) ? url.trim() : null;
 }
 
-// ฟิลด์ cc*/codex* ที่มาจากการยิง API จริง (rate-limited) เท่านั้นที่ mirror จาก peer ได้
-// ไม่รวม token count (ccWindowTokens ฯลฯ) เพราะนับจาก log ในเครื่องนั้นๆ เป็นข้อมูลเฉพาะเครื่อง ไม่ใช่ของบัญชีรวม
-const PEER_MIRROR_FIELDS = [
-  'ccWeekly', 'cc5Hr', 'ccWeeklySubtext', 'cc5HrSubtext', 'ccWeeklyReset', 'cc5HrReset',
-  'ccRateLimited', 'ccRateLimitReset', 'ccLastUpdated', 'ccPlanType',
-  'codexConnected', 'codexPlanType', 'codexPrimaryPercent', 'codexPrimaryReset',
-  'codexSecondaryPercent', 'codexSecondaryReset', 'codexRateLimited', 'codexRateLimitReset', 'codexLastUpdated'
-];
+// ฟิลด์เฉพาะของ Antigravity IDE ประจำเครื่องนี้เท่านั้น จะอ่านจากเครื่องนี้เสมอ ไม่ mirror จาก peer
+const LOCAL_ANTIGRAVITY_FIELDS = new Set([
+  'connected',
+  'ideRunning',
+  'geminiWeekly',
+  'gemini5Hr',
+  'geminiWeeklySubtext',
+  'gemini5HrSubtext',
+  'geminiWeeklyReset',
+  'gemini5HrReset',
+  'claudeWeekly',
+  'claude5Hr',
+  'claudeWeeklySubtext',
+  'claude5HrSubtext',
+  'claudeWeeklyReset',
+  'claude5HrReset',
+  'lastUpdated',
+  'dataSource'
+]);
 
 let peerMirrorData = null; // ค่าล่าสุดที่อ่านได้จาก peer สำเร็จ (null = ยังไม่เคยสำเร็จ/ปิดฟีเจอร์นี้)
 let peerReachableNow = false;
@@ -72,9 +83,13 @@ async function tryMirrorFromPeer() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
+    // Mirror ทุกอย่างจาก Primary (Claude Code, Codex, Spark Local & Containers)
+    // ยกเว้นเฉพาะกล่อง Antigravity ของเครื่องนี้ที่อ่านจาก IDE ในเครื่อง
     const mirrored = {};
-    for (const key of PEER_MIRROR_FIELDS) {
-      if (data[key] !== undefined) mirrored[key] = data[key];
+    for (const [key, value] of Object.entries(data)) {
+      if (!LOCAL_ANTIGRAVITY_FIELDS.has(key) && value !== undefined) {
+        mirrored[key] = value;
+      }
     }
     peerMirrorData = mirrored;
     peerReachableNow = true;
@@ -913,13 +928,18 @@ async function pollLoop() {
   if (!mirrored) {
     await fetchClaudeCodeUsage();
     await fetchCodexUsage();
+    await fetchSparkStatus();
+    try {
+      scanClaudeCodeTokens();
+    } catch (e) {}
   }
-  await fetchSparkStatus();
-  try {
-    scanClaudeCodeTokens();
-  } catch (e) {}
 
   const current = buildDynamicResponse();
+
+  // บันทึก cache ลง last_quota.json เพื่อให้ตอนเปิดเครื่อง (PC boot) มีข้อมูลครบพร้อมแสดงได้ทันที
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(current, null, 2));
+  } catch (e) {}
   const time = new Date().toLocaleTimeString();
   const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
   const mirrorTag = getPeerBridgeUrl() ? (mirrored ? ' [mirror]' : ' [fallback-self]') : '';
