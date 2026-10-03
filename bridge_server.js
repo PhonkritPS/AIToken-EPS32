@@ -5,6 +5,13 @@ const os = require('os');
 const { execSync, exec } = require('child_process');
 
 const PORT = 5000;
+process.on('uncaughtException', (err) => {
+  console.error(`[${new Date().toLocaleTimeString()}] Uncaught Exception:`, err.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`[${new Date().toLocaleTimeString()}] Unhandled Rejection:`, reason);
+});
+
 const CACHE_FILE = path.join(__dirname, 'last_quota.json');
 
 // =========================================================================
@@ -959,6 +966,14 @@ const server = http.createServer((req, res) => {
   }
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[INFO] Port ${PORT} is already in use by another instance. Exiting gracefully.`);
+    process.exit(0);
+  }
+  console.error(`[SERVER ERROR]`, err);
+  process.exit(1);
+});
 server.listen(PORT, '0.0.0.0', () => {
   const nets = os.networkInterfaces();
   const ips = [];
