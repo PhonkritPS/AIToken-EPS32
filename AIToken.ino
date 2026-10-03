@@ -636,11 +636,27 @@ void drawCodexBody() {
     return;
   }
 
-  drawMiniBar(54, rY, 60, 8, codexPrimaryPercent, border, quotaColor(codexPrimaryPercent), bg);
+  String pctStr = String(codexPrimaryPercent) + "%";
+  String rstStr = codexPrimaryReset;
+
+  tft.setTextDatum(TR_DATUM);
+  int rightX = 310;
+  if (rstStr.length() > 0) {
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString(rstStr, rightX, rY);
+    rightX -= tft.textWidth(rstStr) + 6;
+  }
+
   tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(codexPrimaryPercent) + "%", 120, rY);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString(codexPrimaryReset, 156, rY);
+  tft.drawString(pctStr, rightX, rY);
+  rightX -= tft.textWidth(pctStr) + 6;
+
+  int barX = 50;
+  int barW = rightX - barX;
+  if (barW < 30) barW = 30;
+
+  drawMiniBar(barX, rY, barW, 8, codexPrimaryPercent, border, quotaColor(codexPrimaryPercent), bg);
+  tft.setTextDatum(TL_DATUM);
 }
 
 // =========================================================================
