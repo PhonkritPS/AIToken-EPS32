@@ -91,6 +91,9 @@ async function tryMirrorFromPeer() {
         mirrored[key] = value;
       }
     }
+    if (!mirrored.ccPlanType && getClaudePlanType()) {
+      mirrored.ccPlanType = getClaudePlanType();
+    }
     peerMirrorData = mirrored;
     peerReachableNow = true;
     return true;
@@ -183,16 +186,28 @@ let ccTokens = {
   today: { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 }
 };
 
+// ฟังก์ชันอ่านแพ็กเกจ Claude Code จาก credentials
+function getClaudePlanType() {
+  if (quotaStore.ccPlanType) return quotaStore.ccPlanType;
+  try {
+    if (fs.existsSync(CLAUDE_CREDS_FILE)) {
+      const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
+      if (creds && creds.subscriptionType) {
+        quotaStore.ccPlanType = creds.subscriptionType;
+        return creds.subscriptionType;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 // โหลดข้อมูลล่าสุดจากไฟล์แคชขึ้นมาทันทีที่เซิร์ฟเวอร์เริ่มทำงาน
 try {
   if (fs.existsSync(CACHE_FILE)) {
     const saved = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
     quotaStore = { ...quotaStore, ...saved, ideRunning: false };
   }
-  if (fs.existsSync(CLAUDE_CREDS_FILE)) {
-    const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
-    if (creds && creds.subscriptionType) quotaStore.ccPlanType = creds.subscriptionType;
-  }
+  getClaudePlanType();
 } catch (e) {}
 
 // ฟังก์ชันคำนวณเวลานับถอยหลังแบบเรียลไทม์ (Live Countdown)
@@ -865,7 +880,7 @@ function buildDynamicResponse() {
     ...tokenFields('ccWindow', ccTokens.window),
     ...tokenFields('ccToday', ccTokens.today),
     ccLastUpdated: quotaStore.ccLastUpdated,
-    ccPlanType: quotaStore.ccPlanType,
+    ccPlanType: quotaStore.ccPlanType || getClaudePlanType(),
     // สถานะแจ้งเตือน 429: จอไหนอยากโชว์เตือนก็เช็ค ccRateLimited ได้เลย ไม่ต้องรู้เรื่อง Retry-After เอง
     ccRateLimited: ccRateLimitedNow,
     ccRateLimitReset: ccRateLimitReset,
@@ -907,7 +922,11 @@ function buildDynamicResponse() {
   // ถ้าเพิ่งอ่านค่าจากเครื่องหลัก (peerBridgeUrl) สำเร็จรอบล่าสุด ใช้ค่านั้นทับ cc*/codex*
   // แทนค่าที่คำนวณเองในเครื่องนี้ (ซึ่งจะเก่า/ค้าง เพราะเครื่องนี้ไม่ได้ยิง API เอง)
   if (peerReachableNow && peerMirrorData) {
+    const localCcPlan = getClaudePlanType();
     Object.assign(result, peerMirrorData);
+    if (!result.ccPlanType && localCcPlan) {
+      result.ccPlanType = localCcPlan;
+    }
   }
 
   return result;

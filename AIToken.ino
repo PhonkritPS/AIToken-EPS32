@@ -31,9 +31,10 @@ const int HEADER_H[PANELS] = { 14, 14, 14, 14 };
 const int PANEL_Y[PANELS]  = { 1, 54, 107, 144 };
 const int PANEL_H[PANELS]  = { 50, 50, 34, 94 };
 
-const uint16_t PANEL_BG[PANELS]        = { 0x08C5, 0x28A1, 0x0903, 0x0182 }; // กรมท่า (Antigravity) / น้ำตาลอมส้ม (Claude) / เขียวอมฟ้าเข้ม (Codex) / เขียวเข้ม Cyber (Spark)
+const uint16_t HEADER_BG[PANELS]      = { 0x19CD, 0x6162, 0x1208, 0x1204 }; // แถบหัวแผงสีประจำค่าย: น้ำเงินสเลท (Antigravity) / น้ำตาลอิฐส้ม (Claude) / เขียวอมฟ้าทีล (Codex) / มรกตไซเบอร์ (Spark)
+const uint16_t PANEL_BG[PANELS]        = { TFT_BLACK, TFT_BLACK, TFT_BLACK, TFT_BLACK }; // ตัวกรอบเนื้อหาข้อมูลสีดำสนิท คมชัดสูงสุด
 const uint16_t PANEL_BORDER[PANELS]    = { 0x4B0D, 0x6A06, 0x3CB1, 0x2D86 };
-const uint16_t PANEL_TAG_COLOR[PANELS] = { 0x443E, 0xDBAA, 0x56F7, 0x7FE0 }; // ฟ้า / ส้ม / มินต์ / เขียวมะนาว NVIDIA
+const uint16_t PANEL_TAG_COLOR[PANELS] = { TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE }; // ตัวหนังสือชื่อบริการสีขาวคมชัด
 const char* PANEL_TAG[PANELS]          = { "ANTIGRAVITY", "CLAUDE CODE", "OPENAI CODEX", "SPARK LOCAL" };
 
 const int LABEL_X = 8;
@@ -168,7 +169,7 @@ void fetchAndDisplayQuota() {
     Serial.println("WiFi not connected. Retrying connection...");
     WiFi.reconnect();
     if (lastWiFiConnected) {
-      drawWiFiIcon(290, 1, false, PANEL_BG[0]);
+      drawWiFiIcon(290, 1, false, HEADER_BG[0]);
       lastWiFiConnected = false;
     }
     return;
@@ -398,7 +399,7 @@ uint16_t cpuColor(int percent) {
 // =========================================================================
 void drawPanelHeader(int g) {
   int y = PANEL_Y[g];
-  uint16_t bg = PANEL_BG[g];
+  uint16_t bg = HEADER_BG[g];
   int textY = y + (HEADER_H[g] - 8) / 2;
 
   int clearW = (g == 0) ? 275 : 304;
@@ -426,8 +427,9 @@ void drawPanelHeader(int g) {
   } else if (g == 2 && codexPlanType.length() > 0) {
     String plan = codexPlanType;
     plan.toUpperCase();
+    if (plan == "PROLITE") plan = "PRO";
     String badge = "[" + plan + "]";
-    uint16_t badgeCol = (plan == "PRO" || plan == "PLUS" || plan == "PROLITE") ? TFT_GREEN : 0x56F7;
+    uint16_t badgeCol = (plan == "PRO" || plan == "PLUS") ? TFT_GREEN : 0x56F7;
     tft.setTextColor(badgeCol, bg);
     tft.drawString(badge, curX + 4, textY);
     curX += tft.textWidth(badge) + 4;
@@ -435,7 +437,7 @@ void drawPanelHeader(int g) {
 
   // 2. เวลา Last Update
   if (panelLastUpdated[g].length() > 0) {
-    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.setTextColor(0xCE79, bg); // สีเงินสว่างอ่านง่ายบนแถบสี
     tft.drawString(panelLastUpdated[g], curX + 5, textY);
   }
 
@@ -472,7 +474,7 @@ void drawPanelHeader(int g) {
     }
 
     tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.setTextColor(0xCE79, bg);
     tft.drawString("10.104.1.23", 310, textY);
   }
 
@@ -480,10 +482,10 @@ void drawPanelHeader(int g) {
   if (g == 0) {
     tft.setTextDatum(TR_DATUM);
     if (dataSource == "mirror") {
-      tft.setTextColor(TFT_CYAN, bg);
+      tft.setTextColor(0x7FFF, bg);
       tft.drawString("-M", 286, textY);
     } else {
-      tft.setTextColor(TFT_DARKGREY, bg);
+      tft.setTextColor(0xCE79, bg);
       tft.drawString("-L", 286, textY);
     }
   }
@@ -798,13 +800,22 @@ void drawDashboardFull() {
   tft.fillScreen(TFT_BLACK);
 
   for (int g = 0; g < PANELS; g++) {
-    tft.fillRoundRect(1, PANEL_Y[g], 318, PANEL_H[g], 5, PANEL_BG[g]);
-    tft.drawRoundRect(1, PANEL_Y[g], 318, PANEL_H[g], 5, PANEL_BORDER[g]);
+    int y = PANEL_Y[g];
+    // 1. วาดกรอบ Body เต็มใบ (ได้มุมโค้งล่าง 5px)
+    tft.fillRoundRect(1, y, 318, PANEL_H[g], 5, PANEL_BG[g]);
+    // 2. ระบายแถบ Header ด้านบนด้วยสีเข้มลึก (ได้มุมโค้งบน 5px)
+    tft.fillRoundRect(1, y, 318, HEADER_H[g] + 5, 5, HEADER_BG[g]);
+    // 3. ปรับส่วนเกินของ Header คืนเป็นสี Body ให้ขอบเส้นแบ่งเรียบตรง
+    tft.fillRect(2, y + HEADER_H[g] + 1, 316, PANEL_H[g] - HEADER_H[g] - 2, PANEL_BG[g]);
+    // 4. เส้นแบ่งระหว่าง Header กับ Body
+    tft.drawFastHLine(2, y + HEADER_H[g], 316, PANEL_BORDER[g]);
+    // 5. ขอบนอกสุดของการ์ด
+    tft.drawRoundRect(1, y, 318, PANEL_H[g], 5, PANEL_BORDER[g]);
     drawPanelHeader(g);
   }
 
   bool isConnected = (WiFi.status() == WL_CONNECTED);
-  drawWiFiIcon(290, 1, isConnected, PANEL_BG[0]);
+  drawWiFiIcon(290, 1, isConnected, HEADER_BG[0]);
   lastWiFiConnected = isConnected;
 
   drawAntigravityBody();
@@ -819,7 +830,7 @@ void drawDashboardFull() {
 void updateDashboardValues() {
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   if (isConnected != lastWiFiConnected) {
-    drawWiFiIcon(290, 1, isConnected, PANEL_BG[0]);
+    drawWiFiIcon(290, 1, isConnected, HEADER_BG[0]);
     lastWiFiConnected = isConnected;
   }
 
