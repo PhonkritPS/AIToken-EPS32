@@ -115,7 +115,7 @@ let isSparkPolling = false;
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CLAUDE_CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
-const CLAUDE_USAGE_INTERVAL = 180000; // ดึง % โควต้าจาก Anthropic ทุก 3 นาที (180 วิ เพื่อป้องกัน 429 Rate Limit)
+const CLAUDE_USAGE_INTERVAL = 300000; // ดึง % โควต้าจาก Anthropic ทุก 5 นาที (300 วิ เพื่อป้องกัน 429 Rate Limit)
 // โฟลเดอร์ใน projects ที่ไม่ใช่ session ของ Claude Code (เช่น scratch workspace ของ Claude Desktop) ไม่นำมานับ Token
 const CLAUDE_EXCLUDE_PROJECT_DIRS = [/scratch-workspaces/i];
 
@@ -333,7 +333,8 @@ async function fetchClaudeCodeUsage() {
     const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: {
         'Authorization': `Bearer ${creds.accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20'
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'claude-code/2.1.34'
       },
       signal: AbortSignal.timeout(5000)
     });
