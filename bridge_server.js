@@ -963,7 +963,7 @@ async function pollLoop() {
   const time = new Date().toLocaleTimeString();
   const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
   const mirrorTag = getPeerBridgeUrl() ? (mirrored ? ' [mirror]' : ' [fallback-self]') : '';
-  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}%${mirrorTag} | Tok ${current.ccWindowTokens}${ctxStr}`;
+  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}%${mirrorTag} | Tok ${current.ccWindowTokens} (Day ${current.ccTodayTokens})${ctxStr}`;
   const codexInfo = current.codexConnected
     ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
     : '';
