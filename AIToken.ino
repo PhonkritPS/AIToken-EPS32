@@ -693,102 +693,59 @@ void drawSparkRowFull() {
   tft.setTextSize(1);
 
   // -------------------------------------------------------------
-  // Row 1: Host Telemetry - RAM & CPU (y = y0 + 3)
+  // Row 1: Host Telemetry - RAM, CPU, Token, Speed เรียงบรรทัดเดียว (y = y0 + 3) เหมือนจอ eInk
+  // วางต่อกันตามความกว้างข้อความจริง Token + Speed ชิดขวา
   // -------------------------------------------------------------
   int r1Y = y0 + 3;
-  tft.setTextColor(0x7FE0, bg);
-  tft.drawString("Host:", LABEL_X, r1Y);
+  {
+    int rx = LABEL_X;
+    auto drawField = [&](const String &text, uint16_t color) {
+      tft.setTextColor(color, bg);
+      tft.drawString(text, rx, r1Y);
+      rx += (int)text.length() * 6;
+    };
+    drawField("RAM:", 0xAD55);
+    rx += 2;
+    drawField(String(sparkRam) + "%", TFT_WHITE);
+    rx += 4;
+    drawField(sparkRamRatio, 0x9CD3);
+    rx += 6;
+    drawField("CPU:", 0xAD55);
+    rx += 2;
+    drawField(String(sparkCpu) + "%", TFT_WHITE);
 
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("RAM:", LABEL_X + 34, r1Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(sparkRam) + "%", LABEL_X + 60, r1Y);
-  tft.setTextColor(0x9CD3, bg);
-  tft.drawString(sparkRamRatio, LABEL_X + 88, r1Y);
-
-  drawMiniBar(LABEL_X + 144, r1Y, 36, 8, sparkRam, border, cpuColor(sparkRam), bg);
-
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("CPU:", 198, r1Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(sparkCpu) + "%", 226, r1Y);
-  drawMiniBar(254, r1Y, 56, 8, sparkCpu, border, cpuColor(sparkCpu), bg);
-
-  // -------------------------------------------------------------
-  // Row 2: Container 1 (y = y0 + 21)
-  // -------------------------------------------------------------
-  int r2Y = y0 + 21;
-  if (sparkContainerCount > 0) {
-    String c1 = formatContainerName(sparkContainers[0].name);
-    if (c1.length() > 24) c1 = c1.substring(0, 22) + "..";
-    tft.setTextColor(TFT_WHITE, bg);
-    tft.drawString(c1, LABEL_X, r2Y);
-
-    if (sparkContainers[0].running) {
-      drawMiniBar(196, r2Y, 40, 8, sparkContainers[0].cpuVal, border, cpuColor(sparkContainers[0].cpuVal), bg);
-    }
-    tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(sparkContainers[0].running ? TFT_WHITE : TFT_RED, bg);
-    tft.drawString(sparkContainers[0].cpuStr, 310, r2Y);
-    tft.setTextDatum(TL_DATUM);
-  } else {
-    tft.setTextColor(TFT_DARKGREY, bg);
-    tft.drawString("Waiting for container stats...", LABEL_X, r2Y);
-  }
-
-  // -------------------------------------------------------------
-  // Row 3: Container 2 / Model (y = y0 + 39)
-  // -------------------------------------------------------------
-  int r3Y = y0 + 39;
-  if (sparkContainerCount > 1) {
-    String c2 = formatContainerName(sparkContainers[1].name);
-    if (c2.length() > 24) c2 = c2.substring(0, 22) + "..";
-    tft.setTextColor(TFT_WHITE, bg);
-    tft.drawString(c2, LABEL_X, r3Y);
-
-    if (sparkContainers[1].running) {
-      drawMiniBar(196, r3Y, 40, 8, sparkContainers[1].cpuVal, border, cpuColor(sparkContainers[1].cpuVal), bg);
-    }
-    tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(sparkContainers[1].running ? TFT_WHITE : TFT_RED, bg);
-    tft.drawString(sparkContainers[1].cpuStr, 310, r3Y);
-    tft.setTextDatum(TL_DATUM);
-  } else if (sparkModel.length() > 0 && sparkModel != "Local AI") {
-    String mName = formatContainerName(sparkModel);
-    if (mName.length() > 28) mName = mName.substring(0, 26) + "..";
-    tft.setTextColor(0xAD55, bg);
-    tft.drawString("Model:", LABEL_X, r3Y);
-    tft.setTextColor(TFT_WHITE, bg);
-    tft.drawString(mName, LABEL_X + 42, r3Y);
-  }
-
-  // -------------------------------------------------------------
-  // Row 4: Token Usage & Saved Cost (y = y0 + 58)
-  // -------------------------------------------------------------
-  int r4Y = y0 + 58;
-  tft.setTextColor(0x7FE0, bg);
-  tft.drawString("Tokens:", LABEL_X, r4Y);
-
-  String tokStr = (sparkTodayTokens.length() > 0 && sparkTodayTokens != "0") ? sparkTodayTokens : "0";
-  if (sparkSpeed.length() > 0) {
+    String tokStr = (sparkTodayTokens.length() > 0) ? sparkTodayTokens : "0";
     String sp = sparkSpeed;
     sp.trim();
+    if (sp.length() == 0) sp = "0";
     if (!sp.endsWith("t/s")) sp += " t/s";
-    tokStr += " (" + sp + ")";
-  } else {
-    tokStr += " (0 t/s)";
-  }
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(tokStr, LABEL_X + 46, r4Y);
-
-  if (sparkSavedCost.length() > 0 && sparkSavedCost != "$0") {
+    String tokLine = "T: " + tokStr + " (" + sp + ")";
     tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(0x56F7, bg);
-    String saveStr = "Save: " + sparkSavedCost;
-    if (sparkSavedThb.length() > 0 && sparkSavedThb != "฿0") {
-      saveStr += " (" + sparkSavedThb + ")";
+    tft.setTextColor(0x7FE0, bg);
+    tft.drawString(tokLine, 310, r1Y);
+    tft.setTextDatum(TL_DATUM);
+  }
+
+  // -------------------------------------------------------------
+  // Row 2-4: Containers สูงสุด 3 แถว (y = y0 + 21 / 39 / 58) เหมือนจอ eInk
+  // -------------------------------------------------------------
+  if (sparkContainerCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString("Waiting for container stats...", LABEL_X, y0 + 21);
+  }
+  const int rowY[3] = { y0 + 21, y0 + 39, y0 + 58 };
+  for (int i = 0; i < sparkContainerCount && i < 3; i++) {
+    String cn = formatContainerName(sparkContainers[i].name);
+    if (cn.length() > 24) cn = cn.substring(0, 22) + "..";
+    tft.setTextColor(TFT_WHITE, bg);
+    tft.drawString(cn, LABEL_X, rowY[i]);
+
+    if (sparkContainers[i].running) {
+      drawMiniBar(196, rowY[i], 40, 8, sparkContainers[i].cpuVal, border, cpuColor(sparkContainers[i].cpuVal), bg);
     }
-    tft.drawString(saveStr, 310, r4Y);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(sparkContainers[i].running ? TFT_WHITE : TFT_RED, bg);
+    tft.drawString(sparkContainers[i].cpuStr, 310, rowY[i]);
     tft.setTextDatum(TL_DATUM);
   }
 }
