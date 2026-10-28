@@ -277,9 +277,10 @@ function fetchFromLS(port, csrfToken) {
 }
 
 // ค้นหา Process ของ Antigravity Language Server และ Port โดยอัตโนมัติ
+// รุ่นใหม่เปลี่ยนจาก language_server*.exe เป็น agy.exe (~/.gemini/bin) และ flag เป็น --csrf_token=<token>
 async function getAntigravityQuotaLive() {
   try {
-    const psCmd = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' } | Select-Object ProcessId, CommandLine | ConvertTo-Json`;
+    const psCmd = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' -or $_.Name -like 'agy*' } | Select-Object ProcessId, CommandLine | ConvertTo-Json`;
     const out = execSync(`powershell -NoProfile -Command "${psCmd}"`, { stdio: ['pipe', 'pipe', 'ignore'] }).toString();
     const procs = JSON.parse(out);
     const procList = Array.isArray(procs) ? procs : [procs];
@@ -288,7 +289,7 @@ async function getAntigravityQuotaLive() {
 
     for (const proc of procList) {
       if (!proc || !proc.CommandLine) continue;
-      const tokenMatch = proc.CommandLine.match(/--csrf_token\s+([a-f0-9-]+)/);
+      const tokenMatch = proc.CommandLine.match(/--csrf_token[=\s]+([a-f0-9-]+)/);
       if (!tokenMatch) continue;
       const csrfToken = tokenMatch[1];
       const pid = proc.ProcessId;
@@ -777,6 +778,15 @@ function processLiveData(raw) {
   quotaStore.ideRunning = true;
   quotaStore.lastUpdated = new Date().toLocaleTimeString('th-TH');
 
+  // กลุ่มแรกที่ตรงชนะ: รุ่นใหม่มีกลุ่มแยกอย่าง "Gemini 4 Argon" ต่อท้าย ห้ามเขียนทับค่า Gemini หลัก
+  const filled = new Set();
+  const setSlot = (key, pct, reset) => {
+    if (filled.has(key)) return;
+    filled.add(key);
+    quotaStore[key] = pct;
+    quotaStore[key + 'ResetTime'] = reset || null;
+  };
+
   for (const group of raw.groups) {
     const name = (group.displayName || "").toLowerCase();
     const isGemini = name.includes('gemini');
@@ -788,21 +798,9 @@ function processLiveData(raw) {
         const isWeekly = bucket.window === 'weekly' || (bucket.bucketId && bucket.bucketId.includes('weekly')) || (bucket.displayName && bucket.displayName.toLowerCase().includes('weekly'));
 
         if (isGemini) {
-          if (isWeekly) {
-            quotaStore.geminiWeekly = pct;
-            quotaStore.geminiWeeklyResetTime = bucket.resetTime || null;
-          } else {
-            quotaStore.gemini5Hr = pct;
-            quotaStore.gemini5HrResetTime = bucket.resetTime || null;
-          }
+          setSlot(isWeekly ? 'geminiWeekly' : 'gemini5Hr', pct, bucket.resetTime);
         } else if (isClaude) {
-          if (isWeekly) {
-            quotaStore.claudeWeekly = pct;
-            quotaStore.claudeWeeklyResetTime = bucket.resetTime || null;
-          } else {
-            quotaStore.claude5Hr = pct;
-            quotaStore.claude5HrResetTime = bucket.resetTime || null;
-          }
+          setSlot(isWeekly ? 'claudeWeekly' : 'claude5Hr', pct, bucket.resetTime);
         }
       }
     }
