@@ -58,6 +58,8 @@ const LOCAL_ANTIGRAVITY_FIELDS = new Set([
   'gemini5HrSubtext',
   'geminiWeeklyReset',
   'gemini5HrReset',
+  'argonWeekly',
+  'argonWeeklyReset',
   'claudeWeekly',
   'claude5Hr',
   'claudeWeeklySubtext',
@@ -138,6 +140,8 @@ let quotaStore = {
   gemini5Hr: 100,
   geminiWeeklyResetTime: null,
   gemini5HrResetTime: null,
+  argonWeekly: null,          // null = IDE รุ่นนี้ไม่มีกลุ่ม Gemini 4 Argon
+  argonWeeklyResetTime: null,
   claudeWeekly: 100,
   claude5Hr: 100,
   claudeWeeklyResetTime: null,
@@ -789,7 +793,8 @@ function processLiveData(raw) {
 
   for (const group of raw.groups) {
     const name = (group.displayName || "").toLowerCase();
-    const isGemini = name.includes('gemini');
+    const isArgon = name.includes('argon'); // "Gemini 4 Argon" โควต้าแยก มีแค่รายสัปดาห์
+    const isGemini = !isArgon && name.includes('gemini');
     const isClaude = name.includes('claude') || name.includes('gpt') || name.includes('3p');
 
     if (group.buckets) {
@@ -797,7 +802,9 @@ function processLiveData(raw) {
         const pct = Math.round((bucket.remainingFraction ?? 1) * 100);
         const isWeekly = bucket.window === 'weekly' || (bucket.bucketId && bucket.bucketId.includes('weekly')) || (bucket.displayName && bucket.displayName.toLowerCase().includes('weekly'));
 
-        if (isGemini) {
+        if (isArgon) {
+          if (isWeekly) setSlot('argonWeekly', pct, bucket.resetTime);
+        } else if (isGemini) {
           setSlot(isWeekly ? 'geminiWeekly' : 'gemini5Hr', pct, bucket.resetTime);
         } else if (isClaude) {
           setSlot(isWeekly ? 'claudeWeekly' : 'claude5Hr', pct, bucket.resetTime);
@@ -824,6 +831,9 @@ function buildDynamicResponse() {
   const gemini5HrVal = (g5Hr.isExpired && quotaStore.gemini5Hr < 100) ? 100 : quotaStore.gemini5Hr;
   const claudeWeeklyVal = (cWeekly.isExpired && quotaStore.claudeWeekly < 100) ? 100 : quotaStore.claudeWeekly;
   const claude5HrVal = (c5Hr.isExpired && quotaStore.claude5Hr < 100) ? 100 : quotaStore.claude5Hr;
+  const aWeekly = calculateCountdown(quotaStore.argonWeeklyResetTime);
+  const argonWeeklyVal = (quotaStore.argonWeekly === null || quotaStore.argonWeekly === undefined) ? -1
+    : (aWeekly.isExpired && quotaStore.argonWeekly < 100) ? 100 : quotaStore.argonWeekly;
 
   const ccW = calculateCountdown(quotaStore.ccWeeklyResetTime);
   const cc5 = calculateCountdown(quotaStore.cc5HrResetTime);
@@ -863,6 +873,8 @@ function buildDynamicResponse() {
     gemini5HrSubtext: gemini5HrVal < 100 ? g5Hr.text : "",
     geminiWeeklyReset: geminiWeeklyVal < 100 ? gWeekly.short : "",
     gemini5HrReset: gemini5HrVal < 100 ? g5Hr.short : "",
+    argonWeekly: argonWeeklyVal, // -1 = ไม่มีกลุ่ม Argon ให้จอซ่อนแถว
+    argonWeeklyReset: (argonWeeklyVal >= 0 && argonWeeklyVal < 100) ? aWeekly.short : "",
     claudeWeekly: claudeWeeklyVal,
     claude5Hr: claude5HrVal,
     claudeWeeklySubtext: claudeWeeklyVal < 100 ? cWeekly.text : "",

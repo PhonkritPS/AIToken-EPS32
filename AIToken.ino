@@ -28,8 +28,8 @@ bool lastWiFiConnected = false;
 // =========================================================================
 const int PANELS = 4;
 const int HEADER_H[PANELS] = { 14, 14, 14, 14 };
-const int PANEL_Y[PANELS]  = { 1, 54, 107, 144 };
-const int PANEL_H[PANELS]  = { 50, 50, 34, 94 };
+const int PANEL_Y[PANELS]  = { 1, 60, 113, 150 };   // Antigravity สูงขึ้น 6px เพื่อแถว Argon (เอามาจาก Spark)
+const int PANEL_H[PANELS]  = { 56, 50, 34, 88 };
 
 const uint16_t HEADER_BG[PANELS]      = { 0x19CD, 0x6162, 0x1208, 0x1204 }; // แถบหัวแผงสีประจำค่าย: น้ำเงินสเลท (Antigravity) / น้ำตาลอิฐส้ม (Claude) / เขียวอมฟ้าทีล (Codex) / มรกตไซเบอร์ (Spark)
 const uint16_t PANEL_BG[PANELS]        = { TFT_BLACK, TFT_BLACK, TFT_BLACK, TFT_BLACK }; // ตัวกรอบเนื้อหาข้อมูลสีดำสนิท คมชัดสูงสุด
@@ -47,6 +47,8 @@ int geminiWeekly = 100, gemini5Hr = 100;
 String geminiWeeklyReset = "", gemini5HrReset = "";
 int claudeWeekly = 100, claude5Hr = 100;
 String claudeWeeklyReset = "", claude5HrReset = "";
+int argonWeekly = -1;            // -1 = IDE ไม่มีกลุ่ม Gemini 4 Argon
+String argonWeeklyReset = "";
 
 // -------------------------------------------------------------------------
 // 2. ข้อมูล Claude Code (แผง 1)
@@ -210,6 +212,8 @@ void fetchAndDisplayQuota() {
       claudeWeekly = doc["claudeWeekly"] | 100;
       claude5Hr = doc["claude5Hr"] | 100;
       claudeWeeklyReset = formatSubtext(doc["claudeWeeklyReset"] | doc["claudeWeeklySubtext"] | "");
+      argonWeekly = doc["argonWeekly"] | -1;
+      argonWeeklyReset = formatSubtext(doc["argonWeeklyReset"] | "");
       claude5HrReset = formatSubtext(doc["claude5HrReset"] | doc["claude5HrSubtext"] | "");
       panelLastUpdated[0] = doc["lastUpdated"] | "";
 
@@ -509,9 +513,9 @@ void drawAntigravityBody() {
     tft.setTextDatum(MC_DATUM);
     tft.setTextSize(1);
     tft.setTextColor(0xFD20, bg); // ส้มอมเหลืองเตือน
-    tft.drawString("IDE Not Running / Closed", 160, bodyTop + 14);
+    tft.drawString("IDE Not Running / Closed", 160, bodyTop + 13);
     tft.setTextColor(0xAD55, bg); // เทาสว่าง
-    tft.drawString("Open Antigravity IDE to view live quota", 160, bodyTop + 28);
+    tft.drawString("Open Antigravity IDE to view live quota", 160, bodyTop + 27);
     return;
   }
 
@@ -537,8 +541,8 @@ void drawAntigravityBody() {
   tft.setTextColor(TFT_DARKGREY, bg);
   tft.drawString(gemini5HrReset, 260, r1Y);
 
-  // Row 2: Claude & GPT (y = bodyTop + 19)
-  int r2Y = bodyTop + 19;
+  // Row 2: Claude & GPT (y = bodyTop + 16)
+  int r2Y = bodyTop + 16;
   tft.setTextColor(TFT_WHITE, bg);
   tft.drawString("Claude", LABEL_X, r2Y);
 
@@ -555,6 +559,21 @@ void drawAntigravityBody() {
   tft.drawString(String(claude5Hr) + "%", 232, r2Y);
   tft.setTextColor(TFT_DARKGREY, bg);
   tft.drawString(claude5HrReset, 260, r2Y);
+
+  // Row 3: Gemini 4 Argon - มีแค่โควต้ารายสัปดาห์ (y = bodyTop + 29)
+  int r3Y = bodyTop + 29;
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString("Argon", LABEL_X, r3Y);
+  if (argonWeekly >= 0) {
+    drawMiniBar(50, r3Y, 40, 8, argonWeekly, border, quotaColor(argonWeekly), bg);
+    tft.setTextColor(TFT_WHITE, bg);
+    tft.drawString(String(argonWeekly) + "%", 94, r3Y);
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString(argonWeeklyReset, 122, r3Y);
+  } else {
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString("-", 50, r3Y);
+  }
 }
 
 // =========================================================================

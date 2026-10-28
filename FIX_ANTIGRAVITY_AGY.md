@@ -112,3 +112,69 @@ response ที่ถูกต้องมี `response.groups[]` ประก�
 - `Gemini 4 Argon` (กลุ่มใหม่ ตอนนี้ bridge ไม่ใช้ค่านี้)
 
 แต่ละ bucket มี `remainingFraction` (0–1) และ `resetTime`
+
+---
+
+# เพิ่มแถว Gemini 4 Argon บนจอ (ต่อจากการแก้ข้างบน)
+
+วันที่แก้: 2026-10-28 · ไฟล์ที่แก้: `bridge_server.js` และ `AIToken.ino`
+
+Antigravity รุ่นใหม่มีโควต้ากลุ่มที่สาม **"Gemini 4 Argon"** แยกออกมา มีเฉพาะรายสัปดาห์ ไม่มีแบบ 5 ชั่วโมง
+(bucket `gemini-argon-wtu-weekly`) ตอนนี้ bridge แยกค่ากลุ่มนี้ไว้และส่งไปแสดงเป็นแถวที่ 3 ในแผง ANTIGRAVITY
+
+## ฝั่ง Bridge (`bridge_server.js`)
+
+1. เพิ่มชื่อฟิลด์ `'argonWeekly'` และ `'argonWeeklyReset'` ใน `LOCAL_ANTIGRAVITY_FIELDS`
+   เพื่อให้ค่านี้อ่านจาก IDE ในเครื่องตัวเองเสมอ ไม่ mirror มาจาก peer
+2. เพิ่มใน `quotaStore`:
+   ```js
+   argonWeekly: null,          // null = IDE รุ่นนี้ไม่มีกลุ่ม Gemini 4 Argon
+   argonWeeklyResetTime: null,
+   ```
+3. ใน `processLiveData()`: เช็กว่าเป็นกลุ่ม Argon ก่อน เพราะชื่อกลุ่มมีคำว่า gemini ด้วย
+   ```js
+   const isArgon = name.includes('argon'); // "Gemini 4 Argon" โควต้าแยก มีแค่รายสัปดาห์
+   const isGemini = !isArgon && name.includes('gemini');
+   ...
+   if (isArgon) {
+     if (isWeekly) setSlot('argonWeekly', pct, bucket.resetTime);
+   } else if (isGemini) {
+   ```
+4. ใน `buildDynamicResponse()`: คำนวณค่าที่จะส่ง และส่งฟิลด์ใหม่ไปที่จอ
+   ```js
+   const aWeekly = calculateCountdown(quotaStore.argonWeeklyResetTime);
+   const argonWeeklyVal = (quotaStore.argonWeekly === null || quotaStore.argonWeekly === undefined) ? -1
+     : (aWeekly.isExpired && quotaStore.argonWeekly < 100) ? 100 : quotaStore.argonWeekly;
+   ...
+   argonWeekly: argonWeeklyVal, // -1 = ไม่มีกลุ่ม Argon ให้จอซ่อนแถว
+   argonWeeklyReset: (argonWeeklyVal >= 0 && argonWeeklyVal < 100) ? aWeekly.short : "",
+   ```
+
+ฟิลด์ใหม่ใน `/api/quota`:
+
+| ฟิลด์ | ความหมาย |
+|---|---|
+| `argonWeekly` | % โควต้า Argon ที่เหลือ (0–100) หรือ `-1` ถ้า IDE ไม่มีกลุ่มนี้ |
+| `argonWeeklyReset` | เวลาที่เหลือก่อนรีเซ็ต แบบย่อ เช่น `6d 23h` (ว่างเมื่อเหลือ 100%) |
+
+## ฝั่งจอ TFT (`AIToken.ino`)
+
+1. ปรับ layout: แผง Antigravity สูงขึ้น 6px โดยลดแผง Spark ลง 6px ขอบล่างของจอยังเท่าเดิม
+   ```cpp
+   const int PANEL_Y[PANELS]  = { 1, 60, 113, 150 };
+   const int PANEL_H[PANELS]  = { 56, 50, 34, 88 };
+   ```
+2. เพิ่มตัวแปร `int argonWeekly = -1; String argonWeeklyReset = "";`
+   และอ่านค่าจาก JSON ต่อจากบรรทัดที่อ่าน `claudeWeeklyReset`
+3. ใน `drawAntigravityBody()`:
+   - เปลี่ยนระยะแถวเป็น `bodyTop + 3`, `+16`, `+29` (เดิม +3 และ +19)
+   - เพิ่มแถวที่ 3 `Argon [แถบ] xx% รีเซ็ต` ใช้คอลัมน์เดียวกับแถว Gemini/Claude
+     (แถบที่ x=50, ตัวเลข % ที่ x=94, เวลารีเซ็ตที่ x=122) ถ้า `argonWeekly < 0` จะแสดง `-` แทน
+   - ข้อความตอน IDE ปิด ขยับเป็น `bodyTop + 13` และ `+27` ให้อยู่กลางแผงที่สูงขึ้น
+
+## นำไปใช้
+
+1. `git pull`
+2. รีสตาร์ท bridge ตามขั้นตอนในส่วนแรกของไฟล์นี้
+3. Upload `AIToken.ino` ลงบอร์ด ESP32 ใหม่ ต้องอัปโหลดเฟิร์มแวร์ใหม่ด้วยถึงจะเห็นแถว Argon
+4. ตรวจ: `/api/quota` ต้องมี `argonWeekly` (เช่น `97`) และจอต้องแสดงแถว `Argon`
