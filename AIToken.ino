@@ -21,21 +21,24 @@ bool lastWiFiConnected = false;
 
 // =========================================================================
 // Layout 320x240:
-// แผง 0: ANTIGRAVITY (Gemini & Claude/GPT) (กรอบบนสุด)
-// แผง 1: CLAUDE CODE (Plan Limits + Tokens Day / 5H)
+// แผง 0: ANTIGRAVITY (Gemini / Claude & GPT / Argon) (กรอบบนสุด)
+// แผง 1: CLAUDE CODE (Plan Limits Weekly / 5H)
 // แผง 2: OPENAI CODEX (Weekly Limit & Plan)
-// แผง 3: SPARK LOCAL (Host Telemetry, Docker Containers, Tokens & Savings)
+// แผง 3: SPARK LOCAL (Host Telemetry, Docker Containers, Tokens)
+// แผง 4: AI9700 (llama-server บน Radeon AI PRO R9700: Host, GPU/VRAM, Model & Slots)
+// ทุกแผงเว้นห่างกัน 2px และแผงสุดท้ายจบที่แถว 238
 // =========================================================================
-const int PANELS = 4;
-const int HEADER_H[PANELS] = { 14, 14, 14, 14 };
-const int PANEL_Y[PANELS]  = { 1, 60, 113, 150 };   // Antigravity สูงขึ้น 6px เพื่อแถว Argon (เอามาจาก Spark)
-const int PANEL_H[PANELS]  = { 56, 50, 34, 88 };
+const int PANELS = 5;
+const int HEADER_H[PANELS] = { 14, 14, 14, 14, 14 };
+const int PANEL_Y[PANELS]  = { 1, 59, 91, 123, 187 };
+const int PANEL_H[PANELS]  = { 56, 30, 30, 62, 52 };
 
-const uint16_t HEADER_BG[PANELS]      = { 0x19CD, 0x6162, 0x1208, 0x1204 }; // แถบหัวแผงสีประจำค่าย: น้ำเงินสเลท (Antigravity) / น้ำตาลอิฐส้ม (Claude) / เขียวอมฟ้าทีล (Codex) / มรกตไซเบอร์ (Spark)
-const uint16_t PANEL_BG[PANELS]        = { TFT_BLACK, TFT_BLACK, TFT_BLACK, TFT_BLACK }; // ตัวกรอบเนื้อหาข้อมูลสีดำสนิท คมชัดสูงสุด
-const uint16_t PANEL_BORDER[PANELS]    = { 0x4B0D, 0x6A06, 0x3CB1, 0x2D86 };
-const uint16_t PANEL_TAG_COLOR[PANELS] = { TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE }; // ตัวหนังสือชื่อบริการสีขาวคมชัด
-const char* PANEL_TAG[PANELS]          = { "ANTIGRAVITY", "CLAUDE CODE", "OPENAI CODEX", "SPARK LOCAL" };
+const uint16_t HEADER_BG[PANELS]      = { 0x19CD, 0x6162, 0x1208, 0x1204, 0x3809 }; // แถบหัวแผงสีประจำค่าย: น้ำเงินสเลท (Antigravity) / น้ำตาลอิฐส้ม (Claude) / เขียวอมฟ้าทีล (Codex) / มรกตไซเบอร์ (Spark) / แดงเลือดหมู Radeon (AI9700)
+const uint16_t PANEL_BG[PANELS]        = { TFT_BLACK, TFT_BLACK, TFT_BLACK, TFT_BLACK, TFT_BLACK }; // ตัวกรอบเนื้อหาข้อมูลสีดำสนิท คมชัดสูงสุด
+const uint16_t PANEL_BORDER[PANELS]    = { 0x4B0D, 0x6A06, 0x3CB1, 0x2D86, 0x7012 };
+const uint16_t PANEL_TAG_COLOR[PANELS] = { TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE, TFT_WHITE }; // ตัวหนังสือชื่อบริการสีขาวคมชัด
+const char* PANEL_TAG[PANELS]          = { "ANTIGRAVITY", "CLAUDE CODE", "OPENAI CODEX", "SPARK LOCAL", "AI9700" };
+const char* PANEL_HOST_IP[PANELS]      = { "", "", "", "10.104.1.23", "10.104.1.24" };
 
 const int LABEL_X = 8;
 
@@ -55,8 +58,6 @@ String argonWeeklyReset = "";
 // -------------------------------------------------------------------------
 int ccWeekly = 100, cc5Hr = 100;
 String ccWeeklyReset = "", cc5HrReset = "";
-String tokenToday = "-", tokenTodayCache = "0";
-String tokenWindow = "-", tokenWindowCache = "0";
 String ccPlanType = "";
 
 // -------------------------------------------------------------------------
@@ -95,11 +96,22 @@ String sparkSavedCost = "$0";
 String sparkSavedThb = "฿0";
 
 // -------------------------------------------------------------------------
+// 5. ข้อมูล AI9700 Local AI (แผง 4)
+// -------------------------------------------------------------------------
+bool ai9700Connected = false;
+String ai9700Model = "Local AI";
+String ai9700Status = "Offline";
+int ai9700Cpu = 0, ai9700Ram = 0, ai9700Gpu = 0, ai9700Vram = 0;
+String ai9700RamRatio = "0G/0G", ai9700VramRatio = "0G/0G";
+int ai9700SlotsBusy = 0, ai9700SlotsTotal = 0;
+String ai9700TotalTokens = "0", ai9700TodayTokens = "0", ai9700Speed = "";
+
+// -------------------------------------------------------------------------
 // ข้อมูล Header รวม
 // -------------------------------------------------------------------------
-String panelLastUpdated[PANELS] = { "", "", "", "" };
-bool panelRateLimited[PANELS] = { false, false, false, false };       // [1]=Claude Code(แผง1), [2]=Codex(แผง2)
-String panelRateLimitReset[PANELS] = { "", "", "", "" };
+String panelLastUpdated[PANELS] = { "", "", "", "", "" };
+bool panelRateLimited[PANELS] = { false, false, false, false, false };       // [1]=Claude Code(แผง1), [2]=Codex(แผง2)
+String panelRateLimitReset[PANELS] = { "", "", "", "", "" };
 String dataSource = "local";
 
 // ประกาศฟังก์ชันล่วงหน้า
@@ -113,6 +125,9 @@ void drawAntigravityBody();
 void drawClaudeCodeBody();
 void drawCodexBody();
 void drawSparkRowFull();
+void drawAI9700Body();
+void drawHostTokenRow(int rowY, int ram, const String &ramRatio, int cpu,
+                      const String &todayTokens, const String &speed, uint16_t bg);
 uint16_t quotaColor(int percent);
 uint16_t cpuColor(int percent);
 
@@ -186,7 +201,7 @@ void fetchAndDisplayQuota() {
     String payload = http.getString();
     Serial.println("Received payload: " + payload);
 
-    DynamicJsonDocument doc(4096);
+    DynamicJsonDocument doc(6144);
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
@@ -222,10 +237,6 @@ void fetchAndDisplayQuota() {
       cc5Hr = doc["cc5Hr"] | 100;
       ccWeeklyReset = formatSubtext(doc["ccWeeklyReset"] | doc["ccWeeklySubtext"] | "");
       cc5HrReset = formatSubtext(doc["cc5HrReset"] | doc["cc5HrSubtext"] | "");
-      tokenToday = doc["ccTodayTokens"] | "-";
-      tokenTodayCache = doc["ccTodayCache"] | "0";
-      tokenWindow = doc["ccWindowTokens"] | "-";
-      tokenWindowCache = doc["ccWindowCache"] | "0";
       ccPlanType = doc["ccPlanType"] | "";
       panelRateLimited[1] = doc["ccRateLimited"] | false;
       panelRateLimitReset[1] = doc["ccRateLimitReset"] | "";
@@ -322,6 +333,23 @@ void fetchAndDisplayQuota() {
           sparkContainers[sparkContainerCount++] = ci2;
         }
       }
+
+      // 5. AI9700 Local AI (แผง 4)
+      ai9700Connected = doc["ai9700Connected"] | false;
+      ai9700Model = doc["ai9700Model"] | "Local AI";
+      ai9700Status = doc["ai9700Status"] | "Offline";
+      ai9700Cpu = doc["ai9700Cpu"] | 0;
+      ai9700Ram = doc["ai9700Ram"] | 0;
+      ai9700RamRatio = doc["ai9700RamRatio"] | "0G/0G";
+      ai9700Gpu = doc["ai9700Gpu"] | 0;
+      ai9700Vram = doc["ai9700Vram"] | 0;
+      ai9700VramRatio = doc["ai9700VramRatio"] | "0G/0G";
+      ai9700SlotsBusy = doc["ai9700SlotsBusy"] | 0;
+      ai9700SlotsTotal = doc["ai9700SlotsTotal"] | 0;
+      ai9700TotalTokens = doc["ai9700TotalTokens"] | "0";
+      ai9700TodayTokens = doc["ai9700TodayTokens"] | "0";
+      ai9700Speed = doc["ai9700Speed"] | "";
+      panelLastUpdated[4] = doc["ai9700LastUpdated"] | "";
 
       dataSource = doc["dataSource"] | "local";
 
@@ -443,6 +471,7 @@ void drawPanelHeader(int g) {
   if (panelLastUpdated[g].length() > 0) {
     tft.setTextColor(0xCE79, bg); // สีเงินสว่างอ่านง่ายบนแถบสี
     tft.drawString(panelLastUpdated[g], curX + 5, textY);
+    curX += tft.textWidth(panelLastUpdated[g]) + 5;
   }
 
   // 3. ป้ายเตือน Rate Limit หรือสถานะ Spark
@@ -456,30 +485,36 @@ void drawPanelHeader(int g) {
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(TFT_RED, bg);
     tft.drawString(msg, 310, textY);
-  } else if (g == 3) {
+  } else if (g == 3 || g == 4) {
+    // แผง Local AI: สถานะ -A/-R/-X + Token รวม (All:) + IP ชิดขวา
+    bool conn = (g == 3) ? sparkConnected : ai9700Connected;
+    const String &status = (g == 3) ? sparkStatus : ai9700Status;
+    const String &total = (g == 3) ? sparkTotalTokens : ai9700TotalTokens;
+
     String statChar = "-R";
     uint16_t statCol = TFT_CYAN;
-    if (sparkStatus == "Active") {
-      statChar = "-A";
-      statCol = TFT_GREEN;
-    } else if (!sparkConnected) {
+    if (!conn) {
       statChar = "-X";
       statCol = TFT_RED;
+    } else if (status == "Active") {
+      statChar = "-A";
+      statCol = TFT_GREEN;
     }
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(statCol, bg);
-    tft.drawString(statChar, 132, textY);
+    tft.drawString(statChar, curX + 6, textY);
+    curX += tft.textWidth(statChar) + 6;
 
-    if (sparkConnected && sparkTotalTokens.length() > 0 && sparkTotalTokens != "0") {
+    if (conn && total.length() > 0 && total != "0") {
       tft.setTextColor(0x7FE0, bg);
-      tft.drawString("All:", 152, textY);
+      tft.drawString("All:", curX + 8, textY);
       tft.setTextColor(TFT_WHITE, bg);
-      tft.drawString(sparkTotalTokens, 178, textY);
+      tft.drawString(total, curX + 8 + tft.textWidth("All:") + 4, textY);
     }
 
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(0xCE79, bg);
-    tft.drawString("10.104.1.23", 310, textY);
+    tft.drawString(PANEL_HOST_IP[g], 310, textY);
   }
 
   // แผง 0 (อยู่บนสุด) แสดง dataSource (-M / -L) หน้าไอคอน Wi-Fi
@@ -577,7 +612,7 @@ void drawAntigravityBody() {
 }
 
 // =========================================================================
-// แผง 1: CLAUDE CODE (Plan Limits + Tokens Day / 5H)
+// แผง 1: CLAUDE CODE (Plan Limits Weekly / 5H)
 // =========================================================================
 void drawClaudeCodeBody() {
   int y0 = PANEL_Y[1] + HEADER_H[1] + 1;
@@ -594,11 +629,11 @@ void drawClaudeCodeBody() {
   tft.setTextColor(TFT_WHITE, bg);
   tft.drawString("Limit", LABEL_X, r1Y);
 
-  drawMiniBar(48, r1Y, 40, 8, ccWeekly, border, quotaColor(ccWeekly), bg);
+  drawMiniBar(50, r1Y, 40, 8, ccWeekly, border, quotaColor(ccWeekly), bg);
   tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(String(ccWeekly) + "%", 92, r1Y);
+  tft.drawString(String(ccWeekly) + "%", 94, r1Y);
   tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString(ccWeeklyReset, 120, r1Y);
+  tft.drawString(ccWeeklyReset, 122, r1Y);
 
   tft.setTextColor(TFT_WHITE, bg);
   tft.drawString("5H", 168, r1Y);
@@ -607,25 +642,6 @@ void drawClaudeCodeBody() {
   tft.drawString(String(cc5Hr) + "%", 232, r1Y);
   tft.setTextColor(TFT_DARKGREY, bg);
   tft.drawString(cc5HrReset, 260, r1Y);
-
-  // Row 2: Tokens (y = y0 + 19)
-  int r2Y = y0 + 19;
-  tft.setTextColor(0xDBAA, bg);
-  tft.drawString("Tokens", LABEL_X, r2Y);
-
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("Day:", 48, r2Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(tokenToday, 74, r2Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString("(c:" + tokenTodayCache + ")", 108, r2Y);
-
-  tft.setTextColor(0xAD55, bg);
-  tft.drawString("5H:", 168, r2Y);
-  tft.setTextColor(TFT_WHITE, bg);
-  tft.drawString(tokenWindow, 188, r2Y);
-  tft.setTextColor(TFT_DARKGREY, bg);
-  tft.drawString("(c:" + tokenWindowCache + ")", 222, r2Y);
 }
 
 // =========================================================================
@@ -641,7 +657,7 @@ void drawCodexBody() {
   tft.setTextDatum(TL_DATUM);
   tft.setTextSize(1);
 
-  int rY = y0 + 5;
+  int rY = y0 + 3;
   tft.setTextColor(TFT_WHITE, bg);
   tft.drawString("Weekly", LABEL_X, rY);
 
@@ -681,6 +697,41 @@ void drawCodexBody() {
 }
 
 // =========================================================================
+// แถว Host ที่ใช้ร่วมกันระหว่าง Spark และ AI9700:
+// "RAM: x% used/total CPU: y%" ชิดซ้าย และ "T: วันนี้ (ความเร็ว t/s)" ชิดขวา
+// =========================================================================
+void drawHostTokenRow(int rowY, int ram, const String &ramRatio, int cpu,
+                      const String &todayTokens, const String &speed, uint16_t bg) {
+  int rx = LABEL_X;
+  auto drawField = [&](const String &text, uint16_t color) {
+    tft.setTextColor(color, bg);
+    tft.drawString(text, rx, rowY);
+    rx += (int)text.length() * 6;
+  };
+  tft.setTextDatum(TL_DATUM);
+  drawField("RAM:", 0xAD55);
+  rx += 2;
+  drawField(String(ram) + "%", TFT_WHITE);
+  rx += 4;
+  drawField(ramRatio, 0x9CD3);
+  rx += 6;
+  drawField("CPU:", 0xAD55);
+  rx += 2;
+  drawField(String(cpu) + "%", TFT_WHITE);
+
+  String tokStr = (todayTokens.length() > 0) ? todayTokens : "0";
+  String sp = speed;
+  sp.trim();
+  if (sp.length() == 0) sp = "0";
+  if (!sp.endsWith("t/s")) sp += " t/s";
+  String tokLine = "T: " + tokStr + " (" + sp + ")";
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(0x7FE0, bg);
+  tft.drawString(tokLine, 310, rowY);
+  tft.setTextDatum(TL_DATUM);
+}
+
+// =========================================================================
 // แผง 3: SPARK LOCAL (Host Telemetry, Docker Containers, Tokens & Savings)
 // =========================================================================
 void drawSparkRowFull() {
@@ -695,9 +746,9 @@ void drawSparkRowFull() {
     tft.setTextDatum(TL_DATUM);
     tft.setTextSize(1);
     tft.setTextColor(TFT_RED, bg);
-    tft.drawString("Status: Offline / Host Unreachable", LABEL_X, y0 + 18);
+    tft.drawString("Status: Offline / Host Unreachable", LABEL_X, y0 + 12);
     tft.setTextColor(TFT_DARKGREY, bg);
-    tft.drawString("Check Ollama or Local AI Server", LABEL_X, y0 + 36);
+    tft.drawString("Check Ollama or Local AI Server", LABEL_X, y0 + 26);
     return;
   }
 
@@ -715,44 +766,16 @@ void drawSparkRowFull() {
   // Row 1: Host Telemetry - RAM, CPU, Token, Speed เรียงบรรทัดเดียว (y = y0 + 3) เหมือนจอ eInk
   // วางต่อกันตามความกว้างข้อความจริง Token + Speed ชิดขวา
   // -------------------------------------------------------------
-  int r1Y = y0 + 3;
-  {
-    int rx = LABEL_X;
-    auto drawField = [&](const String &text, uint16_t color) {
-      tft.setTextColor(color, bg);
-      tft.drawString(text, rx, r1Y);
-      rx += (int)text.length() * 6;
-    };
-    drawField("RAM:", 0xAD55);
-    rx += 2;
-    drawField(String(sparkRam) + "%", TFT_WHITE);
-    rx += 4;
-    drawField(sparkRamRatio, 0x9CD3);
-    rx += 6;
-    drawField("CPU:", 0xAD55);
-    rx += 2;
-    drawField(String(sparkCpu) + "%", TFT_WHITE);
-
-    String tokStr = (sparkTodayTokens.length() > 0) ? sparkTodayTokens : "0";
-    String sp = sparkSpeed;
-    sp.trim();
-    if (sp.length() == 0) sp = "0";
-    if (!sp.endsWith("t/s")) sp += " t/s";
-    String tokLine = "T: " + tokStr + " (" + sp + ")";
-    tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(0x7FE0, bg);
-    tft.drawString(tokLine, 310, r1Y);
-    tft.setTextDatum(TL_DATUM);
-  }
+  drawHostTokenRow(y0 + 3, sparkRam, sparkRamRatio, sparkCpu, sparkTodayTokens, sparkSpeed, bg);
 
   // -------------------------------------------------------------
-  // Row 2-4: Containers สูงสุด 3 แถว (y = y0 + 21 / 39 / 58) เหมือนจอ eInk
+  // Row 2-4: Containers สูงสุด 3 แถว ห่างกันแถวละ 11px (y = y0 + 14 / 25 / 36)
   // -------------------------------------------------------------
   if (sparkContainerCount == 0) {
     tft.setTextColor(TFT_DARKGREY, bg);
-    tft.drawString("Waiting for container stats...", LABEL_X, y0 + 21);
+    tft.drawString("Waiting for container stats...", LABEL_X, y0 + 14);
   }
-  const int rowY[3] = { y0 + 21, y0 + 39, y0 + 58 };
+  const int rowY[3] = { y0 + 14, y0 + 25, y0 + 36 };
   for (int i = 0; i < sparkContainerCount && i < 3; i++) {
     String cn = formatContainerName(sparkContainers[i].name);
     if (cn.length() > 24) cn = cn.substring(0, 22) + "..";
@@ -765,6 +788,65 @@ void drawSparkRowFull() {
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(sparkContainers[i].running ? TFT_WHITE : TFT_RED, bg);
     tft.drawString(sparkContainers[i].cpuStr, 310, rowY[i]);
+    tft.setTextDatum(TL_DATUM);
+  }
+}
+
+// =========================================================================
+// แผง 4: AI9700 (Host, GPU/VRAM, Model & Slots)
+// =========================================================================
+void drawAI9700Body() {
+  int y0 = PANEL_Y[4] + HEADER_H[4] + 1;
+  int bodyH = PANEL_H[4] - HEADER_H[4] - 2;
+  uint16_t bg = PANEL_BG[4];
+  uint16_t border = PANEL_BORDER[4];
+
+  tft.fillRect(2, y0, 316, bodyH, bg);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextSize(1);
+
+  if (!ai9700Connected) {
+    tft.setTextColor(TFT_RED, bg);
+    tft.drawString("Status: Offline / Host Unreachable", LABEL_X, y0 + 6);
+    tft.setTextColor(TFT_DARKGREY, bg);
+    tft.drawString("Check llama-server on AI9700", LABEL_X, y0 + 20);
+    return;
+  }
+
+  // Row 1: Host RAM / CPU + Token วันนี้ (y = y0 + 3) เหมือนแผง Spark
+  drawHostTokenRow(y0 + 3, ai9700Ram, ai9700RamRatio, ai9700Cpu, ai9700TodayTokens, ai9700Speed, bg);
+
+  // Row 2: GPU x% [bar]  |  VRAM x% used/total [bar] (y = y0 + 14)
+  int r2Y = y0 + 14;
+  tft.setTextColor(0xAD55, bg);
+  tft.drawString("GPU:", LABEL_X, r2Y);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(String(ai9700Gpu) + "%", 34, r2Y);
+  drawMiniBar(64, r2Y, 60, 8, ai9700Gpu, border, cpuColor(ai9700Gpu), bg);
+
+  tft.setTextColor(0xAD55, bg);
+  tft.drawString("VRAM:", 136, r2Y);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(String(ai9700Vram) + "%", 168, r2Y);
+  tft.setTextColor(0x9CD3, bg);
+  tft.drawString(ai9700VramRatio, 198, r2Y);
+  drawMiniBar(258, r2Y, 52, 8, ai9700Vram, border, cpuColor(ai9700Vram), bg);
+
+  // Row 3: ชื่อโมเดล ชิดซ้าย / แถบ % slot ที่กำลังทำงาน + "Slots x/y" ชิดขวา (y = y0 + 25)
+  // แถบอยู่ตำแหน่งเดียวกับแถบ CPU ของ container ในแผง Spark
+  int r3Y = y0 + 25;
+  String mName = ai9700Model;
+  if (mName.length() > 30) mName = mName.substring(0, 28) + "..";
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.drawString(mName, LABEL_X, r3Y);
+
+  if (ai9700SlotsTotal > 0) {
+    int busyPct = (ai9700SlotsBusy * 100) / ai9700SlotsTotal;
+    drawMiniBar(196, r3Y, 40, 8, busyPct, border, cpuColor(busyPct), bg);
+    String slots = "Slots " + String(ai9700SlotsBusy) + "/" + String(ai9700SlotsTotal);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(ai9700SlotsBusy > 0 ? TFT_GREEN : 0xAD55, bg);
+    tft.drawString(slots, 310, r3Y);
     tft.setTextDatum(TL_DATUM);
   }
 }
@@ -798,6 +880,7 @@ void drawDashboardFull() {
   drawClaudeCodeBody();
   drawCodexBody();
   drawSparkRowFull();
+  drawAI9700Body();
 }
 
 // =========================================================================
@@ -818,4 +901,5 @@ void updateDashboardValues() {
   drawClaudeCodeBody();
   drawCodexBody();
   drawSparkRowFull();
+  drawAI9700Body();
 }
