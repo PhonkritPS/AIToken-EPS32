@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, exec } = require('child_process');
+const { execSync, exec, execFile } = require('child_process');
 
 const PORT = 5000;
 process.on('uncaughtException', (err) => {
@@ -113,6 +113,17 @@ const SPARK_USAGE_INTERVAL = 10000; // ตรวจสอบทุก 10 วิ�
 let lastSparkPoll = 0;
 let isSparkPolling = false;
 
+// AI9700 Local AI (10.104.1.24): llama-server (Qwen) บน Radeon AI PRO R9700
+// ต่อ SSH ด้วยคีย์เฉพาะเครื่องนี้ แล้วรันคำสั่งทั้งหมดบนเครื่องนั้น (API key ของ llama-server ไม่ออกจากเครื่อง)
+const AI9700_HOST = '10.104.1.24';
+const AI9700_SSH_USER = 'phonkrit';
+const AI9700_SSH_KEY = path.join(os.homedir(), '.ssh', 'id_ed25519_ai9700');
+const AI9700_USAGE_INTERVAL = 10000; // ตรวจสอบทุก 10 วินาที
+// ยอด token สะสม (All/Today) เก็บแยกไฟล์ เพราะ /metrics ของ llama-server เริ่มนับ 0 ใหม่ทุกครั้งที่ restart
+const AI9700_STATE_FILE = path.join(__dirname, 'ai9700_state.json');
+let lastAi9700Poll = 0;
+let isAi9700Polling = false;
+
 // Claude Code: โฟลเดอร์ config (รองรับ CLAUDE_CONFIG_DIR เหมือนตัว CLI)
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CLAUDE_CREDS_FILE = path.join(CLAUDE_DIR, '.credentials.json');
@@ -181,6 +192,22 @@ let quotaStore = {
   sparkC2Name: '',
   sparkC2Cpu: '',
   sparkLastUpdated: null,
+  // AI9700 Local AI (llama-server บน 10.104.1.24)
+  ai9700Connected: false,
+  ai9700Model: 'Local AI',
+  ai9700Status: 'Offline',
+  ai9700Cpu: 0,
+  ai9700Ram: 0,
+  ai9700RamRatio: '0G/0G',
+  ai9700Gpu: 0,
+  ai9700Vram: 0,
+  ai9700VramRatio: '0G/0G',
+  ai9700SlotsBusy: 0,
+  ai9700SlotsTotal: 0,
+  ai9700TotalTokens: '0',
+  ai9700TodayTokens: '0',
+  ai9700Speed: '',
+  ai9700LastUpdated: null,
   lastUpdated: null
 };
 
@@ -643,6 +670,168 @@ async function fetchSparkStatus() {
 }
 
 // =========================================================================
+// AI9700 Local AI: llama-server + Radeon AI PRO R9700 (10.104.1.24)
+// ส่งสคริปต์ผ่าน stdin ของ SSH รันบนเครื่องนั้นครั้งเดียวได้ครบ: CPU/RAM, GPU/VRAM,
+// /metrics (token, ความเร็ว), /slots (กำลังตอบกี่คน) และชื่อโมเดล
+// llama-server ต้องเปิด --metrics ไว้ (เพิ่มใน llama-server.service แล้ว 2026-10-29)
+// =========================================================================
+const AI9700_REMOTE_SCRIPT = String.raw`
+top -bn1 | head -n 5
+echo ===FREE===
+free -m
+echo ===GPU===
+rocm-smi --showuse --showmeminfo vram 2>/dev/null
+K=$(cat ~/.llama-api-key 2>/dev/null)
+echo ===METRICS===
+curl -s -m 3 -H "Authorization: Bearer $K" localhost:8080/metrics | grep -E '^llamacpp:'
+echo ===SLOTS===
+curl -s -m 3 -H "Authorization: Bearer $K" localhost:8080/slots | python3 -c 'import sys,json; d=json.load(sys.stdin); print(sum(1 for s in d if s.get("is_processing")), len(d))' 2>/dev/null
+echo ===MODEL===
+curl -s -m 3 -H "Authorization: Bearer $K" localhost:8080/v1/models | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null
+echo ===END===
+`;
+
+function loadAi9700State() {
+  try {
+    return JSON.parse(fs.readFileSync(AI9700_STATE_FILE, 'utf8'));
+  } catch (e) {
+    return { total: 0, today: 0, day: '', lastRaw: 0, lastPred: 0, lastPredSec: 0, speed: 0 };
+  }
+}
+
+function localDateKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// แปลงขนาด RAM เป็น GB แบบเดียวกับ Spark (ปัดให้เป็นขนาดแรมมาตรฐาน)
+function formatRamTotalGb(totalMb) {
+  if (totalMb >= 115000 && totalMb <= 135000) return '128G';
+  if (totalMb >= 58000 && totalMb <= 70000) return '64G';
+  if (totalMb >= 28000 && totalMb <= 35000) return '32G';
+  return Math.round(totalMb / 1024) + 'G';
+}
+
+// ตัดเอาเฉพาะส่วนระหว่างตัวคั่น ===NAME=== ของเรา (rocm-smi มีบรรทัด ===== ของมันเองปนอยู่ ห้ามหยุดตรงนั้น)
+function sectionOf(stdout, name) {
+  const m = stdout.match(new RegExp(`===${name}===\\s*([\\s\\S]*?)(?=\\n===[A-Z]+===|$)`));
+  return m ? m[1].trim() : '';
+}
+
+function fetchAi9700Status() {
+  const now = Date.now();
+  if (isAi9700Polling && (now - lastAi9700Poll > 15000)) isAi9700Polling = false;
+  if (now - lastAi9700Poll < AI9700_USAGE_INTERVAL) return;
+  if (isAi9700Polling) return;
+  lastAi9700Poll = now;
+  isAi9700Polling = true;
+
+  const args = [
+    '-i', AI9700_SSH_KEY,
+    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=3',
+    '-o', 'ServerAliveInterval=2', '-o', 'ServerAliveCountMax=2',
+    `${AI9700_SSH_USER}@${AI9700_HOST}`, 'bash -s'
+  ];
+
+  let child;
+  try {
+    child = execFile('ssh', args, { timeout: 10000 }, (err, stdout) => {
+      isAi9700Polling = false;
+      if (err || !stdout || !stdout.includes('===END===')) {
+        quotaStore.ai9700Connected = false;
+        quotaStore.ai9700Status = 'Offline';
+        return;
+      }
+
+      quotaStore.ai9700Connected = true;
+
+      const mCpu = stdout.match(/(\d+\.?\d*)\s*id/);
+      quotaStore.ai9700Cpu = mCpu ? Math.max(0, Math.min(100, Math.round(100 - parseFloat(mCpu[1])))) : 0;
+
+      const mMem = stdout.match(/Mem:\s+(\d+)\s+(\d+)/);
+      if (mMem) {
+        const total = parseInt(mMem[1], 10);
+        const used = parseInt(mMem[2], 10);
+        quotaStore.ai9700Ram = Math.max(0, Math.min(100, Math.round((used / total) * 100)));
+        quotaStore.ai9700RamRatio = `${Math.round(used / 1024)}G/${formatRamTotalGb(total)}`;
+      }
+
+      const gpu = sectionOf(stdout, 'GPU');
+      const mGpu = gpu.match(/GPU use \(%\):\s*(\d+)/);
+      const mVramTotal = gpu.match(/VRAM Total Memory \(B\):\s*(\d+)/);
+      const mVramUsed = gpu.match(/VRAM Total Used Memory \(B\):\s*(\d+)/);
+      quotaStore.ai9700Gpu = mGpu ? Math.max(0, Math.min(100, parseInt(mGpu[1], 10))) : 0;
+      if (mVramTotal && mVramUsed) {
+        const total = parseInt(mVramTotal[1], 10);
+        const used = parseInt(mVramUsed[1], 10);
+        const GiB = 1024 * 1024 * 1024;
+        quotaStore.ai9700Vram = total > 0 ? Math.round((used / total) * 100) : 0;
+        quotaStore.ai9700VramRatio = `${Math.round(used / GiB)}G/${Math.round(total / GiB)}G`;
+      }
+
+      const metrics = sectionOf(stdout, 'METRICS');
+      const metric = (name) => {
+        const m = metrics.match(new RegExp(`^llamacpp:${name}\\s+([\\d.eE+-]+)`, 'm'));
+        return m ? parseFloat(m[1]) : null;
+      };
+      const promptTotal = metric('prompt_tokens_total');
+      const predTotal = metric('tokens_predicted_total');
+      const predSec = metric('tokens_predicted_seconds_total');
+      const processing = metric('requests_processing') || 0;
+
+      const slots = sectionOf(stdout, 'SLOTS').match(/(\d+)\s+(\d+)/);
+      quotaStore.ai9700SlotsBusy = slots ? parseInt(slots[1], 10) : 0;
+      quotaStore.ai9700SlotsTotal = slots ? parseInt(slots[2], 10) : 0;
+
+      const model = sectionOf(stdout, 'MODEL').split(/\r?\n/)[0];
+      if (model) quotaStore.ai9700Model = formatOllamaModel(model);
+
+      if (promptTotal === null || predTotal === null) {
+        // SSH ได้ แต่ llama-server ไม่ตอบ (ปิดอยู่/กำลังโหลดโมเดล)
+        quotaStore.ai9700Status = 'Offline';
+      } else {
+        quotaStore.ai9700Status = (processing > 0 || quotaStore.ai9700SlotsBusy > 0) ? 'Active' : 'Ready';
+
+        // สะสม token: ตัวนับของ llama-server เริ่ม 0 ใหม่เมื่อ restart -> ค่าลดลงแปลว่าเพิ่ง restart
+        const st = loadAi9700State();
+        const raw = promptTotal + predTotal;
+        const delta = raw >= st.lastRaw ? raw - st.lastRaw : raw;
+        const day = localDateKey();
+        if (st.day !== day) {
+          st.day = day;
+          st.today = 0;
+        }
+        st.total += delta;
+        st.today += delta;
+
+        // ความเร็ว = token ที่สร้างเพิ่ม / เวลาที่ใช้สร้างเพิ่ม ในรอบนี้ (ไม่มีงานใหม่ก็คงค่าล่าสุดไว้)
+        const restarted = raw < st.lastRaw;
+        const dPred = restarted ? predTotal : predTotal - st.lastPred;
+        const dSec = restarted ? (predSec || 0) : (predSec || 0) - st.lastPredSec;
+        if (dPred > 0 && dSec > 0) st.speed = dPred / dSec;
+
+        st.lastRaw = raw;
+        st.lastPred = predTotal;
+        st.lastPredSec = predSec || 0;
+        try {
+          fs.writeFileSync(AI9700_STATE_FILE, JSON.stringify(st, null, 2));
+        } catch (e) {}
+
+        quotaStore.ai9700TotalTokens = formatTokens(st.total);
+        quotaStore.ai9700TodayTokens = formatTokens(st.today);
+        quotaStore.ai9700Speed = st.speed > 0 ? `${Math.round(st.speed)} t/s` : '';
+      }
+
+      quotaStore.ai9700LastUpdated = new Date().toLocaleTimeString('th-TH');
+    });
+    // ไฟล์นี้เป็น CRLF ต้องตัด \r ออก ไม่งั้นทุกบรรทัดที่ส่งให้ bash จะมี \r ติดท้าย (URL ของ curl พัง)
+    child.stdin.end(AI9700_REMOTE_SCRIPT.replace(/\r/g, ''));
+  } catch (e) {
+    isAi9700Polling = false;
+  }
+}
+
+// =========================================================================
 // Claude Code: นับ Token จากไฟล์ log (~/.claude/projects/**/*.jsonl)
 // แคชผลแยกตามไฟล์ อ่านใหม่เฉพาะไฟล์ที่มีการเปลี่ยนแปลง
 // =========================================================================
@@ -924,6 +1113,21 @@ function buildDynamicResponse() {
     sparkC2Name: quotaStore.sparkC2Name || '',
     sparkC2Cpu: quotaStore.sparkC2Cpu || '',
     sparkLastUpdated: quotaStore.sparkLastUpdated || '',
+    ai9700Connected: quotaStore.ai9700Connected,
+    ai9700Model: quotaStore.ai9700Model || 'Local AI',
+    ai9700Status: quotaStore.ai9700Status || 'Offline',
+    ai9700Cpu: quotaStore.ai9700Cpu ?? 0,
+    ai9700Ram: quotaStore.ai9700Ram ?? 0,
+    ai9700RamRatio: quotaStore.ai9700RamRatio || '0G/0G',
+    ai9700Gpu: quotaStore.ai9700Gpu ?? 0,
+    ai9700Vram: quotaStore.ai9700Vram ?? 0,
+    ai9700VramRatio: quotaStore.ai9700VramRatio || '0G/0G',
+    ai9700SlotsBusy: quotaStore.ai9700SlotsBusy ?? 0,
+    ai9700SlotsTotal: quotaStore.ai9700SlotsTotal ?? 0,
+    ai9700TotalTokens: quotaStore.ai9700TotalTokens || '0',
+    ai9700TodayTokens: quotaStore.ai9700TodayTokens || '0',
+    ai9700Speed: quotaStore.ai9700Speed || '',
+    ai9700LastUpdated: quotaStore.ai9700LastUpdated || '',
     lastUpdated: quotaStore.lastUpdated,
     // "mirror" = กำลังอ่าน cc*/codex* จากเครื่องหลักผ่าน peerBridgeUrl สำเร็จอยู่
     // "local"  = เครื่องนี้ยิง API เอง (ไม่ได้ตั้ง peerBridgeUrl ไว้ หรือตั้งไว้แต่เอื้อมไม่ถึงเลย fallback มายิงเอง)
@@ -959,6 +1163,7 @@ async function pollLoop() {
     await fetchClaudeCodeUsage();
     await fetchCodexUsage();
     await fetchSparkStatus();
+    fetchAi9700Status();
     try {
       scanClaudeCodeTokens();
     } catch (e) {}
@@ -980,11 +1185,14 @@ async function pollLoop() {
   const sparkInfo = current.sparkConnected
     ? ` | Spark ${current.sparkModel}(${current.sparkStatus}) CPU ${current.sparkCpu}% RAM ${current.sparkRam}%(${current.sparkRamRatio}) Tok ${current.sparkTotalTokens}(Save ${current.sparkSavedCost})`
     : '';
+  const ai9700Info = current.ai9700Connected
+    ? ` | AI9700 ${current.ai9700Model}(${current.ai9700Status}) GPU ${current.ai9700Gpu}% VRAM ${current.ai9700VramRatio} Tok ${current.ai9700TodayTokens}/${current.ai9700TotalTokens}`
+    : '';
   if (current.ideRunning) {
-    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}${sparkInfo}`);
+    writeStatusLine(`[${time}] ON  | Gemini ${current.geminiWeekly}%(${current.gemini5Hr}%) | Claude ${current.claudeWeekly}%(${current.claude5Hr}%) | ${ccInfo}${codexInfo}${sparkInfo}${ai9700Info}`);
   } else {
     const sub = current.gemini5HrSubtext ? `5Hr ${current.gemini5HrSubtext}` : `Wk ${current.geminiWeeklySubtext}`;
-    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}${codexInfo}${sparkInfo}`);
+    writeStatusLine(`[${time}] OFF | Reset ${sub} | ${ccInfo}${codexInfo}${sparkInfo}${ai9700Info}`);
   }
 }
 
