@@ -349,6 +349,16 @@ async function getAntigravityQuotaLive() {
 // =========================================================================
 let lastCcUsageFetch = 0;
 let ccRetryUntil = 0;
+let ccFetchError = null; // ข้อความ error ล่าสุดของการดึงโควต้า (null = ดึงสำเร็จ) ค่า % ที่ส่งไปจะเป็นค่าเก่าค้างอยู่
+
+// จำ error ไว้ส่งให้จอ และเขียน log เฉพาะตอนสถานะเปลี่ยน (ไม่ให้ log ซ้ำทุก 5 นาที)
+function setCcFetchError(msg) {
+  if (msg === ccFetchError) return;
+  const time = new Date().toLocaleTimeString();
+  if (msg) process.stdout.write(`\n[${time}] Claude Code usage fetch failed: ${msg}. Showing stale values.\n`);
+  else if (ccFetchError) process.stdout.write(`\n[${time}] Claude Code usage fetch recovered.\n`);
+  ccFetchError = msg;
+}
 
 async function fetchClaudeCodeUsage() {
   if (!isPrimaryForExternalUsage()) return; // เครื่อง Secondary: ไม่ยิง API ซ้ำกับเครื่องอื่น
@@ -360,7 +370,15 @@ async function fetchClaudeCodeUsage() {
   try {
     const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS_FILE, 'utf8')).claudeAiOauth;
     if (creds && creds.subscriptionType) quotaStore.ccPlanType = creds.subscriptionType;
-    if (!creds || !creds.accessToken) return;
+    if (!creds || !creds.accessToken) {
+      setCcFetchError('not logged in (run claude to login)');
+      return;
+    }
+    // bridge ไม่ refresh token เอง (กันชนกับ Claude Code) ต้องรอ Claude Code CLI รันแล้ว refresh ให้
+    if (creds.expiresAt && Date.now() > creds.expiresAt) {
+      setCcFetchError('token expired (run claude to refresh)');
+      return;
+    }
 
     const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: {
@@ -377,11 +395,14 @@ async function fetchClaudeCodeUsage() {
         ccRetryUntil = Date.now() + (retrySec * 1000);
         const retryTime = new Date(ccRetryUntil).toLocaleTimeString();
         process.stdout.write(`\n[${new Date().toLocaleTimeString()}] Claude Code API rate-limited (429). Pausing requests until ${retryTime} (~${Math.ceil(retrySec / 60)} min).\n`);
+      } else {
+        setCcFetchError(res.status === 401 ? 'HTTP 401 (token invalid, run claude to refresh)' : `HTTP ${res.status}`);
       }
       return;
     }
 
     const data = await res.json();
+    setCcFetchError(null);
     if (data.five_hour) {
       quotaStore.cc5Hr = Math.max(0, Math.round(100 - (data.five_hour.utilization ?? 0)));
       quotaStore.cc5HrResetTime = data.five_hour.resets_at || null;
@@ -395,7 +416,9 @@ async function fetchClaudeCodeUsage() {
     try {
       fs.writeFileSync(CACHE_FILE, JSON.stringify(quotaStore, null, 2));
     } catch (e) {}
-  } catch (e) {}
+  } catch (e) {
+    setCcFetchError(e.message || 'request failed');
+  }
 }
 
 // =========================================================================
@@ -1084,6 +1107,9 @@ function buildDynamicResponse() {
     // สถานะแจ้งเตือน 429: จอไหนอยากโชว์เตือนก็เช็ค ccRateLimited ได้เลย ไม่ต้องรู้เรื่อง Retry-After เอง
     ccRateLimited: ccRateLimitedNow,
     ccRateLimitReset: ccRateLimitReset,
+    // ดึงโควต้าไม่สำเร็จ (เช่น token หมดอายุ): ccStale = true แปลว่า cc5Hr/ccWeekly เป็นค่าเก่าตั้งแต่ ccLastUpdated
+    ccStale: !!ccFetchError,
+    ccError: ccFetchError || "",
     codexConnected: quotaStore.codexConnected,
     codexPlanType: quotaStore.codexPlanType,
     // -1 = ไม่มีข้อมูล (แพลนนี้ไม่มีหน้าต่างนี้ หรือยังไม่เคยดึงสำเร็จ) จอควรข้ามไม่วาดช่องนี้
@@ -1178,7 +1204,8 @@ async function pollLoop() {
   const time = new Date().toLocaleTimeString();
   const ctxStr = current.ccActiveContext && current.ccActiveContext !== '0' ? ` (Ctx ${current.ccActiveContext})` : '';
   const mirrorTag = getPeerBridgeUrl() ? (mirrored ? ' [mirror]' : ' [fallback-self]') : '';
-  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}%${mirrorTag} | Tok ${current.ccWindowTokens} (Day ${current.ccTodayTokens})${ctxStr}`;
+  const staleTag = current.ccStale ? ` [stale since ${current.ccLastUpdated}]` : '';
+  const ccInfo = `CC ${current.cc5Hr}%/${current.ccWeekly}%${mirrorTag}${staleTag} | Tok ${current.ccWindowTokens} (Day ${current.ccTodayTokens})${ctxStr}`;
   const codexInfo = current.codexConnected
     ? ` | Codex ${current.codexPrimaryPercent}%${current.codexSecondaryPercent >= 0 ? `/${current.codexSecondaryPercent}%` : ''}`
     : '';
